@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__shadcn__get_project_registries",
+      "mcp__context7__resolve-library-id",
+      "mcp__shadcn__list_items_in_registries",
+      "mcp__context7__query-docs",
+      "mcp__shadcn__search_items_in_registries",
+      "mcp__shadcn__view_items_in_registries",
+      "mcp__shadcn__get_item_examples_from_registries",
+      "mcp__shadcn__get_add_command_for_items",
+      "Bash(git init:*)",
+      "Bash(npx create-next-app@latest:*)",
+      "Bash(cp:*)",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest:*)",
+      "Bash(npm run:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)",
+      "Bash(cat:*)",
+      "Bash(cat '/Users/ahmet/.claude/projects/-Users-ahmet-Desktop-hetzner-cluster-apps-cluster-dashboard/6a9839a3-1910-47a0-9fbb-c7fca210365e/tool-results/toolu_01Rmxk1kvcB2Wh6LvFu1EcmV.json' | python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); print\\(data[0]['text']\\)\" > /tmp/plan_output.txt)",
+      "Bash(npx tsc:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(npx eslint:*)",
+      "Bash(python3:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(cd:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "shadcn"
+  ]
+}
