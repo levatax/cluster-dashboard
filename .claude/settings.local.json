@@ -25,7 +25,9 @@
       "Bash(npx eslint:*)",
       "Bash(python3:*)",
       "Bash(npm uninstall:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "WebFetch(domain:docs.k3s.io)",
+      "Bash(wc:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

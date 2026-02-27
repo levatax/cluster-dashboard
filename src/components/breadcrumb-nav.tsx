@@ -17,7 +17,7 @@ export function BreadcrumbNav() {
   const { name } = useBreadcrumbName();
 
   // Match /clusters/[id]
-  const isClusterDetail = /^\/clusters\/\d+$/.test(pathname);
+  const isClusterDetail = /^\/clusters\/[a-f0-9]{24}$/.test(pathname);
 
   if (!isClusterDetail) {
     return <BreadcrumbPage className="text-sm font-medium">K8s Dashboard</BreadcrumbPage>;

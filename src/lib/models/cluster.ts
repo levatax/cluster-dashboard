@@ -1,4 +1,9 @@
 import mongoose, { Schema, type Document } from "mongoose";
+import { AlertConfigModel } from "./alert-config";
+import { AppInstallModel } from "./app-install";
+import { GithubDeploymentModel } from "./github-deployment";
+import { DeploymentHistoryModel } from "./deployment-history";
+import { DockerhubDeploymentModel } from "./dockerhub-deployment";
 
 export interface ICluster extends Document {
   name: string;
@@ -25,14 +30,18 @@ ClusterSchema.pre("findOneAndDelete", async function () {
   const doc = await this.model.findOne(this.getFilter());
   if (!doc) return;
   const id = doc._id;
-  const m = mongoose.models;
-  await Promise.all([
-    m.AlertConfig?.deleteMany({ cluster_id: id }),
-    m.AppInstall?.deleteMany({ cluster_id: id }),
-    m.GithubDeployment?.deleteMany({ cluster_id: id }),
-    m.DeploymentHistory?.deleteMany({ cluster_id: id }),
-    m.DockerhubDeployment?.deleteMany({ cluster_id: id }),
+  const results = await Promise.allSettled([
+    AlertConfigModel.deleteMany({ cluster_id: id }),
+    AppInstallModel.deleteMany({ cluster_id: id }),
+    GithubDeploymentModel.deleteMany({ cluster_id: id }),
+    DeploymentHistoryModel.deleteMany({ cluster_id: id }),
+    DockerhubDeploymentModel.deleteMany({ cluster_id: id }),
   ]);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.error("Cascade delete failed for cluster", id.toString(), result.reason);
+    }
+  }
 });
 
 export const ClusterModel =

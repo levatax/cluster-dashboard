@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion } from "motion/react";
-import { X, Eye } from "lucide-react";
+import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -26,10 +26,11 @@ const ease = [0.25, 0.46, 0.45, 0.94] as const;
 
 interface EventsTableProps {
   events: ClusterEventInfo[];
+  initialTypeFilter?: "all" | "Normal" | "Warning";
 }
 
-export function EventsTable({ events }: EventsTableProps) {
-  const [typeFilter, setTypeFilter] = useState<"all" | "Normal" | "Warning">("all");
+export function EventsTable({ events, initialTypeFilter = "all" }: EventsTableProps) {
+  const [typeFilter, setTypeFilter] = useState<"all" | "Normal" | "Warning">(initialTypeFilter);
   const [selectedEvent, setSelectedEvent] = useState<ClusterEventInfo | null>(null);
 
   const filtered = useMemo(() => {
@@ -87,7 +88,8 @@ export function EventsTable({ events }: EventsTableProps) {
         </span>
       </div>
 
-      <div className="rounded-md border">
+      <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+      <div className="rounded-md border min-w-[700px]">
         <Table>
           <TableHeader>
             <TableRow>
@@ -97,14 +99,13 @@ export function EventsTable({ events }: EventsTableProps) {
               <TableHead>Message</TableHead>
               <TableHead className="w-[60px]">Count</TableHead>
               <TableHead className="w-[70px]">Age</TableHead>
-              <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={6}
                   className="text-muted-foreground py-8 text-center"
                 >
                   No events match the current filter.
@@ -116,8 +117,9 @@ export function EventsTable({ events }: EventsTableProps) {
                   key={`${event.namespace}/${event.name}`}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: i * 0.02, ease }}
-                  className="border-b transition-colors hover:bg-muted/50"
+                  transition={{ duration: 0.3, delay: Math.min(i * 0.02, 0.3), ease }}
+                  className="border-b transition-colors hover:bg-muted/50 cursor-pointer"
+                  onClick={() => setSelectedEvent(event)}
                 >
                   <TableCell>
                     <Badge
@@ -140,21 +142,12 @@ export function EventsTable({ events }: EventsTableProps) {
                   </TableCell>
                   <TableCell>{event.count}</TableCell>
                   <TableCell>{event.age}</TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={() => setSelectedEvent(event)}
-                    >
-                      <Eye className="size-3.5" />
-                    </Button>
-                  </TableCell>
                 </motion.tr>
               ))
             )}
           </TableBody>
         </Table>
+      </div>
       </div>
 
       <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>

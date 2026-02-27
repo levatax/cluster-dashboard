@@ -5,6 +5,13 @@ import { Download, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetContent,
   SheetHeader,
@@ -53,10 +60,18 @@ export function PodLogViewer({
     initialLoadRef.current = false;
   }, [pod, containers]);
 
-  const loadSnapshot = useCallback(async () => {
+  // Reset initial load flag when re-opening for the same pod
+  useEffect(() => {
+    if (!open) {
+      initialLoadRef.current = false;
+    }
+  }, [open]);
+
+  const loadSnapshot = useCallback(async (containerOverride?: string) => {
+    const targetContainer = containerOverride ?? container;
     setLoading(true);
     setLogs("");
-    const result = await fetchPodLogs(clusterId, namespace, pod, container, tailLines);
+    const result = await fetchPodLogs(clusterId, namespace, pod, targetContainer, tailLines);
     if (result.success) {
       setLogs(result.data);
     } else {
@@ -65,7 +80,8 @@ export function PodLogViewer({
     setLoading(false);
   }, [clusterId, namespace, pod, container, tailLines]);
 
-  const startStream = useCallback(() => {
+  const startStream = useCallback((containerOverride?: string) => {
+    const targetContainer = containerOverride ?? container;
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
@@ -76,7 +92,7 @@ export function PodLogViewer({
     const params = new URLSearchParams({
       namespace,
       pod,
-      container,
+      container: targetContainer,
       tailLines: "50",
     });
 
@@ -117,11 +133,8 @@ export function PodLogViewer({
   function handleContainerChange(c: string) {
     setContainer(c);
     setLogs("");
-    // Trigger fetch on next render cycle
-    setTimeout(() => {
-      if (mode === "snapshot") loadSnapshot();
-      else startStream();
-    }, 0);
+    if (mode === "snapshot") loadSnapshot(c);
+    else startStream(c);
   }
 
   function handleModeChange(m: Mode) {
@@ -129,10 +142,8 @@ export function PodLogViewer({
     eventSourceRef.current = null;
     setMode(m);
     setLogs("");
-    setTimeout(() => {
-      if (m === "snapshot") loadSnapshot();
-      else startStream();
-    }, 0);
+    if (m === "snapshot") loadSnapshot();
+    else startStream();
   }
 
   function handleLoad() {
@@ -214,16 +225,20 @@ export function PodLogViewer({
           </div>
 
           {mode === "snapshot" && (
-            <select
-              value={tailLines}
-              onChange={(e) => setTailLines(Number(e.target.value))}
-              className="bg-background border-input h-8 rounded-md border px-2 text-sm"
+            <Select
+              value={String(tailLines)}
+              onValueChange={(v) => setTailLines(Number(v))}
             >
-              <option value={50}>50 lines</option>
-              <option value={100}>100 lines</option>
-              <option value={500}>500 lines</option>
-              <option value={1000}>1000 lines</option>
-            </select>
+              <SelectTrigger size="sm" className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="50">50 lines</SelectItem>
+                <SelectItem value="100">100 lines</SelectItem>
+                <SelectItem value="500">500 lines</SelectItem>
+                <SelectItem value="1000">1000 lines</SelectItem>
+              </SelectContent>
+            </Select>
           )}
 
           <div className="ml-auto flex gap-1">
@@ -231,10 +246,11 @@ export function PodLogViewer({
               variant="outline"
               size="sm"
               onClick={() => setShowSearch(!showSearch)}
+              aria-label="Toggle search"
             >
               <Search className="size-3.5" />
             </Button>
-            <Button variant="outline" size="sm" onClick={handleDownload} disabled={!logs}>
+            <Button variant="outline" size="sm" onClick={handleDownload} disabled={!logs} aria-label="Download logs">
               <Download className="size-3.5" />
             </Button>
             <Button variant="outline" size="sm" onClick={handleLoad} disabled={loading}>
@@ -252,12 +268,15 @@ export function PodLogViewer({
               className="pr-8"
             />
             {search && (
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => setSearch("")}
-                className="text-muted-foreground absolute right-6 top-1/2 -translate-y-1/2"
+                aria-label="Clear search"
+                className="absolute right-6 top-1/2 -translate-y-1/2 size-6"
               >
                 <X className="size-3.5" />
-              </button>
+              </Button>
             )}
           </div>
         )}

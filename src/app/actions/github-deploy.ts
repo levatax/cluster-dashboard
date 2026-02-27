@@ -3,9 +3,10 @@
 import yaml from "js-yaml";
 import { getClusterById, insertGithubDeployment, getGithubDeployments, updateGithubDeploymentStatus, deleteGithubDeployment, insertDeploymentHistory, getClusterRegistryUrl, type GithubDeploymentRow } from "@/lib/db";
 import { parseGitHubUrl, getRepoInfo, detectDeployType, getFileContent, getLatestCommitSha, type DetectedDeployType, type RepoInfo } from "@/lib/github";
-import { generateDeploymentManifests } from "@/lib/manifest-generator";
+import { generateDeploymentManifests, type EnvVar } from "@/lib/manifest-generator";
 import { applyResourceYaml, deleteResource, createBuildJob, getBuildJobStatus, getBuildLogs } from "@/lib/kubernetes";
 import type * as k8s from "@kubernetes/client-node";
+import { requireSession } from "@/lib/auth";
 
 type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -20,6 +21,7 @@ export async function analyzeGithubRepo(
   token?: string | null
 ): Promise<ActionResult<RepoAnalysis>> {
   try {
+    await requireSession();
     const parsed = parseGitHubUrl(repoUrl);
     if (!parsed) return { success: false, error: "Invalid GitHub URL" };
 
@@ -33,11 +35,7 @@ export async function analyzeGithubRepo(
   }
 }
 
-export interface EnvVar {
-  key: string;
-  value: string;
-  isSecret: boolean;
-}
+export type { EnvVar } from "@/lib/manifest-generator";
 
 export async function deployFromGithub(
   clusterId: string,
@@ -58,6 +56,7 @@ export async function deployFromGithub(
   }
 ): Promise<ActionResult<GithubDeploymentRow>> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 
@@ -119,9 +118,7 @@ export async function deployFromGithub(
       return { success: false, error: deployErr instanceof Error ? deployErr.message : "Failed to deploy" };
     }
 
-    const allDeployments = await getGithubDeployments(clusterId);
-    const updated = allDeployments.find((d) => d.id === deployment.id) || deployment;
-    return { success: true, data: updated };
+    return { success: true, data: deployment };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Failed to deploy from GitHub" };
   }
@@ -129,6 +126,7 @@ export async function deployFromGithub(
 
 export async function fetchGithubDeployments(clusterId: string): Promise<ActionResult<GithubDeploymentRow[]>> {
   try {
+    await requireSession();
     const deployments = await getGithubDeployments(clusterId);
     return { success: true, data: deployments };
   } catch (e) {
@@ -148,6 +146,7 @@ export async function startBuildAction(
   }
 ): Promise<{ success: true; data: { jobName: string; image: string } } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 
@@ -196,6 +195,7 @@ export async function getBuildStatusAction(
   jobName: string
 ): Promise<{ success: true; data: { phase: string; message?: string } } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const status = await getBuildJobStatus(cluster.kubeconfig_yaml, namespace, jobName);
@@ -211,6 +211,7 @@ export async function getBuildLogsAction(
   jobName: string
 ): Promise<{ success: true; data: string } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const logs = await getBuildLogs(cluster.kubeconfig_yaml, namespace, jobName);
@@ -225,6 +226,7 @@ export async function removeGithubDeployment(
   deploymentId: string
 ): Promise<ActionResult<void>> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 

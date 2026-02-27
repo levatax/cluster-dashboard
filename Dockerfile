@@ -38,7 +38,24 @@ COPY . .
 
 RUN npm run build
 
-# ─── Stage 3: runner ─────────────────────────────────────────────────────────
+# ─── Stage 3: seed ───────────────────────────────────────────────────────────
+# One-off image for seeding the admin user. Build with --target seed.
+# docker build --target seed -t cluster-dashboard-seed .
+# docker run --rm -e MONGODB_URI=... -e ADMIN_USERNAME=... -e ADMIN_PASSWORD=... cluster-dashboard-seed
+FROM node:22-alpine AS seed
+WORKDIR /app
+
+ENV MONGODB_URI="" \
+    ADMIN_USERNAME="" \
+    ADMIN_PASSWORD=""
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY scripts/ ./scripts/
+COPY package.json ./
+
+CMD ["npx", "tsx", "scripts/seed.ts"]
+
+# ─── Stage 4: runner ─────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner
 WORKDIR /app
 

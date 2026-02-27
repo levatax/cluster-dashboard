@@ -20,12 +20,14 @@ const DeploymentHistorySchema = new Schema<IDeploymentHistory>(
     action: { type: String, required: true },
     release_name: { type: String, required: true },
     namespace: { type: String, required: true, default: "default" },
-    status: { type: String, required: true },
+    status: { type: String, required: true, enum: ["deploying", "deployed", "failed", "uninstalling", "uninstalled"] },
     details: { type: Schema.Types.Mixed, required: true, default: {} },
     created_at: { type: Date, default: Date.now },
   },
   { collection: "deployment_history" }
 );
+
+DeploymentHistorySchema.index({ cluster_id: 1, created_at: -1 });
 
 export const DeploymentHistoryModel =
   (mongoose.models.DeploymentHistory as mongoose.Model<IDeploymentHistory>) ||

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { StaggerGrid } from "@/components/motion-primitives";
+import { StaggerGrid, StaggerItem } from "@/components/motion-primitives";
 import { ApplicationCard } from "@/components/application-card";
 import { ApplicationDetailSheet } from "@/components/application-detail-sheet";
 import type { DiscoveredApplication } from "@/lib/types";
@@ -85,6 +85,20 @@ export function ApplicationsSection({
     return apps;
   }, [applications, search, healthFilter, showSystem]);
 
+  const groupedFiltered = useMemo(() => {
+    const groups: Record<string, DiscoveredApplication[]> = {};
+    for (const app of filtered) {
+      if (!groups[app.namespace]) groups[app.namespace] = [];
+      groups[app.namespace].push(app);
+    }
+    return groups;
+  }, [filtered]);
+
+  const sortedNamespaces = useMemo(
+    () => Object.keys(groupedFiltered).sort(),
+    [groupedFiltered]
+  );
+
   const healthyCount = applications.filter((a) => a.status === "Healthy").length;
   const namespaces = new Set(applications.map((a) => a.namespace));
   const totalHosts = applications.reduce((sum, a) => sum + a.hosts.length, 0);
@@ -96,6 +110,12 @@ export function ApplicationsSection({
 
   return (
     <div className="space-y-4">
+      {/* Header */}
+      <div>
+        <h2 className="text-base font-semibold">Applications</h2>
+        <p className="text-sm text-muted-foreground">Workloads discovered and running on this cluster</p>
+      </div>
+
       {/* Summary stat cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
@@ -164,7 +184,7 @@ export function ApplicationsSection({
         </div>
       </div>
 
-      {/* App grid */}
+      {/* App list grouped by namespace */}
       {filtered.length === 0 ? (
         <div className="py-12 text-center">
           <Layers className="mx-auto size-10 text-muted-foreground/40" />
@@ -175,13 +195,26 @@ export function ApplicationsSection({
           </p>
         </div>
       ) : (
-        <StaggerGrid className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((app) => (
-            <ApplicationCard
-              key={`${app.namespace}/${app.name}`}
-              app={app}
-              onClick={() => handleCardClick(app)}
-            />
+        <StaggerGrid className="space-y-4">
+          {sortedNamespaces.map((ns) => (
+            <StaggerItem key={ns}>
+              <div className="flex items-center gap-1.5 mb-2">
+                <FolderOpen className="size-3.5 text-muted-foreground" />
+                <h3 className="text-sm font-medium font-mono">{ns}</h3>
+                <span className="text-xs text-muted-foreground">
+                  ({groupedFiltered[ns].length})
+                </span>
+              </div>
+              <div className="rounded-lg border divide-y overflow-hidden">
+                {groupedFiltered[ns].map((app) => (
+                  <ApplicationCard
+                    key={`${app.namespace}/${app.name}`}
+                    app={app}
+                    onClick={() => handleCardClick(app)}
+                  />
+                ))}
+              </div>
+            </StaggerItem>
           ))}
         </StaggerGrid>
       )}

@@ -28,6 +28,8 @@ import {
   getPersistentVolumes,
   getPersistentVolumeClaims,
   getStorageClasses,
+  getConfigMaps,
+  getSecrets,
   type ClusterInfo,
   type NodeInfo,
   type PodInfo,
@@ -42,23 +44,27 @@ import {
   type PersistentVolumeInfo,
   type PersistentVolumeClaimInfo,
   type StorageClassInfo,
+  type ConfigMapInfo,
+  type SecretInfo,
 } from "@/lib/kubernetes";
 import { discoverApplications } from "@/lib/applications";
 import { helmList, helmUninstall, type HelmRelease } from "@/lib/helm";
 import type { DiscoveredApplication } from "@/lib/types";
 import type * as k8s from "@kubernetes/client-node";
+import { requireSession, generateTerminalToken } from "@/lib/auth";
 
 export async function fetchClusterInfo(
   clusterId: string
 ): Promise<{ success: true; data: ClusterInfo & { connected: boolean } } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) {
       return { success: false, error: "Cluster not found" };
     }
 
-    const connected = await checkConnection(cluster.kubeconfig_yaml);
-    if (!connected) {
+    const connStatus = await checkConnection(cluster.kubeconfig_yaml);
+    if (connStatus !== "connected") {
       return {
         success: true,
         data: {
@@ -85,6 +91,7 @@ export async function fetchNodes(
   clusterId: string
 ): Promise<{ success: true; data: NodeInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) {
       return { success: false, error: "Cluster not found" };
@@ -102,6 +109,7 @@ export async function fetchNamespaces(
   clusterId: string
 ): Promise<{ success: true; data: string[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) {
       return { success: false, error: "Cluster not found" };
@@ -120,6 +128,7 @@ export async function fetchPods(
   namespace?: string
 ): Promise<{ success: true; data: PodInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) {
       return { success: false, error: "Cluster not found" };
@@ -139,6 +148,7 @@ export async function fetchDeploymentPods(
   selector: Record<string, string>
 ): Promise<{ success: true; data: PodInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) {
       return { success: false, error: "Cluster not found" };
@@ -157,6 +167,7 @@ export async function fetchDeployments(
   namespace?: string
 ): Promise<{ success: true; data: DeploymentInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) {
       return { success: false, error: "Cluster not found" };
@@ -175,6 +186,7 @@ export async function fetchServices(
   namespace?: string
 ): Promise<{ success: true; data: ServiceInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) {
       return { success: false, error: "Cluster not found" };
@@ -193,6 +205,7 @@ export async function fetchIngresses(
   namespace?: string
 ): Promise<{ success: true; data: IngressInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) {
       return { success: false, error: "Cluster not found" };
@@ -210,6 +223,7 @@ export async function fetchIngressClasses(
   clusterId: string
 ): Promise<{ success: true; data: IngressClassInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) {
       return { success: false, error: "Cluster not found" };
@@ -227,6 +241,7 @@ export async function fetchNodeMetrics(
   clusterId: string
 ): Promise<{ success: true; data: NodeMetricsInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const metrics = await getNodeMetrics(cluster.kubeconfig_yaml);
@@ -242,6 +257,7 @@ export async function fetchPodMetrics(
   namespace?: string
 ): Promise<{ success: true; data: PodMetricsInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const metrics = await getPodMetrics(cluster.kubeconfig_yaml, namespace);
@@ -257,6 +273,7 @@ export async function fetchEvents(
   namespace?: string
 ): Promise<{ success: true; data: ClusterEventInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const events = await getEvents(cluster.kubeconfig_yaml, namespace);
@@ -271,6 +288,7 @@ export async function fetchClusterHealth(
   clusterId: string
 ): Promise<{ success: true; data: ClusterHealthSummary } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const health = await getClusterHealthSummary(cluster.kubeconfig_yaml);
@@ -289,6 +307,7 @@ export async function fetchPodLogs(
   tailLines = 100
 ): Promise<{ success: true; data: string } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const logs = await getPodLogSnapshot(cluster.kubeconfig_yaml, namespace, pod, container, tailLines);
@@ -306,6 +325,7 @@ export async function cordonNodeAction(
   nodeName: string
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     await cordonNode(cluster.kubeconfig_yaml, nodeName);
@@ -321,6 +341,7 @@ export async function uncordonNodeAction(
   nodeName: string
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     await uncordonNode(cluster.kubeconfig_yaml, nodeName);
@@ -334,9 +355,10 @@ export async function uncordonNodeAction(
 export async function drainNodeAction(
   clusterId: string,
   nodeName: string,
-  options?: { ignoreDaemonSets?: boolean }
+  options?: { skipDaemonSets?: boolean }
 ): Promise<{ success: true; data: { evicted: string[]; errors: string[] } } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const result = await drainNode(cluster.kubeconfig_yaml, nodeName, options);
@@ -354,6 +376,10 @@ export async function scaleDeploymentAction(
   replicas: number
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
+    await requireSession();
+    if (!Number.isInteger(replicas) || replicas < 0 || replicas > 100) {
+      return { success: false, error: "Replicas must be an integer between 0 and 100" };
+    }
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     await scaleDeployment(cluster.kubeconfig_yaml, namespace, name, replicas);
@@ -372,6 +398,7 @@ export async function getResourceYamlAction(
   namespace?: string
 ): Promise<{ success: true; data: object } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const resource = await getResourceYaml(cluster.kubeconfig_yaml, apiVersion, kind, name, namespace);
@@ -382,11 +409,25 @@ export async function getResourceYamlAction(
   }
 }
 
+const ALLOWED_RESOURCE_KINDS = new Set([
+  "Deployment", "Service", "Ingress", "ConfigMap", "Secret",
+  "PersistentVolumeClaim", "HorizontalPodAutoscaler", "CronJob", "Job",
+  "StatefulSet", "DaemonSet", "Namespace", "ServiceAccount",
+  "NetworkPolicy", "LimitRange", "ResourceQuota",
+]);
+
 export async function applyResourceYamlAction(
   clusterId: string,
   resourceSpec: k8s.KubernetesObject
 ): Promise<{ success: true; data: object } | { success: false; error: string }> {
   try {
+    await requireSession();
+
+    const kind = resourceSpec.kind;
+    if (!kind || !ALLOWED_RESOURCE_KINDS.has(kind)) {
+      return { success: false, error: `Resource kind "${kind}" is not allowed` };
+    }
+
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const result = await applyResourceYaml(cluster.kubeconfig_yaml, resourceSpec);
@@ -405,6 +446,10 @@ export async function deleteResourceAction(
   namespace?: string
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
+    await requireSession();
+    if (!kind || !ALLOWED_RESOURCE_KINDS.has(kind)) {
+      return { success: false, error: `Resource kind "${kind}" is not allowed` };
+    }
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     await deleteResource(cluster.kubeconfig_yaml, apiVersion, kind, name, namespace);
@@ -419,6 +464,7 @@ export async function fetchClusterRegistryUrl(
   clusterId: string
 ): Promise<{ success: true; data: string | null } | { success: false; error: string }> {
   try {
+    await requireSession();
     const url = await getClusterRegistryUrl(clusterId);
     return { success: true, data: url };
   } catch (e) {
@@ -432,6 +478,7 @@ export async function updateClusterRegistryUrl(
   registryUrl: string | null
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
+    await requireSession();
     await setClusterRegistryUrl(clusterId, registryUrl);
     return { success: true };
   } catch (e) {
@@ -445,6 +492,7 @@ export async function createNamespaceAction(
   name: string
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 
@@ -468,6 +516,7 @@ export async function fetchPersistentVolumes(
   clusterId: string
 ): Promise<{ success: true; data: PersistentVolumeInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const pvs = await getPersistentVolumes(cluster.kubeconfig_yaml);
@@ -483,6 +532,7 @@ export async function fetchPersistentVolumeClaims(
   namespace?: string
 ): Promise<{ success: true; data: PersistentVolumeClaimInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const pvcs = await getPersistentVolumeClaims(cluster.kubeconfig_yaml, namespace);
@@ -497,12 +547,47 @@ export async function fetchStorageClasses(
   clusterId: string
 ): Promise<{ success: true; data: StorageClassInfo[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const storageClasses = await getStorageClasses(cluster.kubeconfig_yaml);
     return { success: true, data: storageClasses };
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to fetch storage classes";
+    return { success: false, error: message };
+  }
+}
+
+// --- Configuration (ConfigMaps & Secrets) ---
+
+export async function fetchConfigMaps(
+  clusterId: string,
+  namespace?: string
+): Promise<{ success: true; data: ConfigMapInfo[] } | { success: false; error: string }> {
+  try {
+    await requireSession();
+    const cluster = await getClusterById(clusterId);
+    if (!cluster) return { success: false, error: "Cluster not found" };
+    const configMaps = await getConfigMaps(cluster.kubeconfig_yaml, namespace);
+    return { success: true, data: configMaps };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Failed to fetch config maps";
+    return { success: false, error: message };
+  }
+}
+
+export async function fetchSecrets(
+  clusterId: string,
+  namespace?: string
+): Promise<{ success: true; data: SecretInfo[] } | { success: false; error: string }> {
+  try {
+    await requireSession();
+    const cluster = await getClusterById(clusterId);
+    if (!cluster) return { success: false, error: "Cluster not found" };
+    const secrets = await getSecrets(cluster.kubeconfig_yaml, namespace);
+    return { success: true, data: secrets };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Failed to fetch secrets";
     return { success: false, error: message };
   }
 }
@@ -514,6 +599,7 @@ export async function fetchApplications(
   namespace?: string
 ): Promise<{ success: true; data: DiscoveredApplication[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 
@@ -540,6 +626,7 @@ export async function fetchHelmReleases(
   namespace?: string
 ): Promise<{ success: true; data: HelmRelease[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const releases = await helmList(cluster.kubeconfig_yaml, namespace);
@@ -556,6 +643,7 @@ export async function uninstallHelmRelease(
   namespace: string
 ): Promise<{ success: true; data: string } | { success: false; error: string }> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
     const output = await helmUninstall(cluster.kubeconfig_yaml, releaseName, namespace);
@@ -574,6 +662,7 @@ export async function deleteApplicationResources(
   | { success: false; error: string }
 > {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 
@@ -605,6 +694,25 @@ export async function deleteApplicationResources(
     return { success: true, data: { deleted, errors } };
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to delete application resources";
+    return { success: false, error: message };
+  }
+}
+
+// --- Terminal token ---
+
+export async function getTerminalToken(
+  clusterId: string,
+  namespace: string,
+  pod: string,
+): Promise<{ success: true; data: string } | { success: false; error: string }> {
+  try {
+    await requireSession();
+    const cluster = await getClusterById(clusterId);
+    if (!cluster) return { success: false, error: "Cluster not found" };
+    const token = generateTerminalToken(clusterId, pod, namespace);
+    return { success: true, data: token };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Failed to generate terminal token";
     return { success: false, error: message };
   }
 }

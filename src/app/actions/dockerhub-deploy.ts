@@ -10,17 +10,14 @@ import {
   insertDeploymentHistory,
   type DockerhubDeploymentRow,
 } from "@/lib/db";
-import { generateDeploymentManifests } from "@/lib/manifest-generator";
+import { generateDeploymentManifests, type EnvVar } from "@/lib/manifest-generator";
 import { applyResourceYaml, deleteResource } from "@/lib/kubernetes";
 import type * as k8s from "@kubernetes/client-node";
+import { requireSession } from "@/lib/auth";
 
 type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
-export interface EnvVar {
-  key: string;
-  value: string;
-  isSecret: boolean;
-}
+export type { EnvVar } from "@/lib/manifest-generator";
 
 export interface DockerHubDeployConfig {
   name: string;
@@ -39,6 +36,7 @@ export async function deployFromDockerhub(
   deployConfig: DockerHubDeployConfig
 ): Promise<ActionResult<DockerhubDeploymentRow>> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 
@@ -111,9 +109,7 @@ export async function deployFromDockerhub(
       return { success: false, error: deployErr instanceof Error ? deployErr.message : "Failed to deploy" };
     }
 
-    const allDeployments = await getDockerhubDeployments(clusterId);
-    const updated = allDeployments.find((d) => d.id === deployment.id) || deployment;
-    return { success: true, data: updated };
+    return { success: true, data: deployment };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Failed to deploy from Docker Hub" };
   }
@@ -123,6 +119,7 @@ export async function fetchDockerhubDeployments(
   clusterId: string
 ): Promise<ActionResult<DockerhubDeploymentRow[]>> {
   try {
+    await requireSession();
     const deployments = await getDockerhubDeployments(clusterId);
     return { success: true, data: deployments };
   } catch (e) {
@@ -143,6 +140,7 @@ export async function searchDockerhub(
   query: string
 ): Promise<ActionResult<DockerHubSearchResult[]>> {
   try {
+    await requireSession();
     const response = await fetch(
       `https://hub.docker.com/v2/search/repositories/?query=${encodeURIComponent(query)}&page_size=10`
     );
@@ -151,8 +149,18 @@ export async function searchDockerhub(
       return { success: false, error: "Failed to search Docker Hub" };
     }
 
-    const data = await response.json();
-    return { success: true, data: data.results || [] };
+    const data = await response.json() as { results?: unknown[] };
+    const results = Array.isArray(data?.results)
+      ? (data.results as DockerHubSearchResult[]).map((r) => ({
+          repo_name: r.repo_name ?? "",
+          repo_owner: r.repo_owner,
+          short_description: r.short_description,
+          star_count: r.star_count,
+          pull_count: r.pull_count,
+          is_official: r.is_official ?? false,
+        }))
+      : [];
+    return { success: true, data: results };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Failed to search Docker Hub" };
   }
@@ -163,6 +171,7 @@ export async function removeDockerhubDeployment(
   deploymentId: string
 ): Promise<ActionResult<void>> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 

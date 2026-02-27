@@ -10,9 +10,9 @@ export type InnerSidebarSection =
   | "pods"
   | "deployments"
   | "services"
+  | "configuration"
   | "storage"
   | "helm-releases"
-  | "logs"
   | "app-store"
   | "github-deploy"
   | "dockerhub-deploy"
@@ -25,6 +25,7 @@ export interface SidebarCounts {
   pods?: number;
   deployments?: number;
   services?: number;
+  configuration?: number;
   storage?: number;
   helmReleases?: number;
   alerts?: number;

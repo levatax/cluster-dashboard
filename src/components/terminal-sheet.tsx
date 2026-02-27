@@ -43,7 +43,7 @@ export function TerminalSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="sm:max-w-3xl flex flex-col overflow-hidden" side="bottom" style={{ height: "60vh" }}>
+      <SheetContent className="sm:max-w-3xl flex flex-col overflow-hidden" side="bottom" style={{ height: "60vh" }} onEscapeKeyDown={(e) => e.preventDefault()}>
         <SheetHeader>
           <SheetTitle className="flex items-center gap-3">
             Terminal: {pod}

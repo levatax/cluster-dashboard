@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, usePathname } from "next/navigation";
 import {
   ChevronsUpDown,
   Check,
@@ -12,7 +12,6 @@ import {
   Rocket,
   Globe,
   HardDrive,
-  ScrollText,
   Store,
   GitBranch,
   History,
@@ -20,6 +19,7 @@ import {
   Container,
   Anchor,
   Home,
+  Settings2,
 } from "lucide-react";
 import {
   Sidebar,
@@ -33,7 +33,6 @@ import {
   SidebarMenuBadge,
   SidebarMenuItem,
   SidebarRail,
-  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -67,10 +66,14 @@ interface AppSidebarProps {
 export function AppSidebar({ clusters }: AppSidebarProps) {
   const params = useParams();
   const router = useRouter();
+  const pathname = usePathname();
   const { activeSection, setActiveSection, connected, counts } = useClusterSidebar();
 
   const currentClusterId = params?.id as string | undefined;
   const currentCluster = clusters.find((c) => c.id === currentClusterId);
+
+  // Don't render sidebar on the home page — it has no cluster context
+  if (pathname === "/") return null;
 
   const groups: NavGroup[] = [
     {
@@ -125,6 +128,13 @@ export function AppSidebar({ clusters }: AppSidebarProps) {
           badge: counts?.services,
         },
         {
+          id: "configuration",
+          label: "Configuration",
+          icon: Settings2,
+          disabled: !connected,
+          badge: counts?.configuration,
+        },
+        {
           id: "storage",
           label: "Storage",
           icon: HardDrive,
@@ -137,12 +147,6 @@ export function AppSidebar({ clusters }: AppSidebarProps) {
           icon: Anchor,
           disabled: !connected,
           badge: counts?.helmReleases,
-        },
-        {
-          id: "logs",
-          label: "Logs",
-          icon: ScrollText,
-          disabled: !connected,
         },
       ],
     },
@@ -173,6 +177,7 @@ export function AppSidebar({ clusters }: AppSidebarProps) {
                 <SidebarMenuButton
                   size="lg"
                   tooltip={currentCluster?.name ?? "Select cluster"}
+                  suppressHydrationWarning
                 >
                   <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gradient-from)] to-[var(--gradient-to)] shadow-sm">
                     {currentCluster ? (
@@ -233,7 +238,6 @@ export function AppSidebar({ clusters }: AppSidebarProps) {
 
       {currentCluster && (
         <>
-          <SidebarSeparator />
           <SidebarContent>
             {groups.map((group) => (
               <SidebarGroup key={group.title}>
@@ -250,6 +254,7 @@ export function AppSidebar({ clusters }: AppSidebarProps) {
                             isActive={activeSection === item.id}
                             disabled={item.disabled}
                             tooltip={item.label}
+                            tabIndex={item.disabled ? -1 : undefined}
                             onClick={() =>
                               !item.disabled && setActiveSection(item.id)
                             }

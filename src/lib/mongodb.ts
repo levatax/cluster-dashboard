@@ -14,6 +14,9 @@ export async function connectDB(): Promise<typeof mongoose> {
     throw new Error("Please define the MONGODB_URI environment variable");
   }
 
-  globalWithMongoose._mongoosePromise = mongoose.connect(uri);
+  globalWithMongoose._mongoosePromise = mongoose.connect(uri).catch((err) => {
+    globalWithMongoose._mongoosePromise = undefined;
+    throw err;
+  });
   return globalWithMongoose._mongoosePromise;
 }

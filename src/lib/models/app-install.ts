@@ -20,12 +20,14 @@ const AppInstallSchema = new Schema<IAppInstall>(
     namespace: { type: String, required: true, default: "default" },
     config_values: { type: Schema.Types.Mixed, required: true, default: {} },
     deploy_method: { type: String, required: true, default: "manifest" },
-    status: { type: String, required: true, default: "deploying" },
+    status: { type: String, required: true, default: "deploying", enum: ["deploying", "deployed", "failed", "uninstalling", "uninstalled"] },
     created_at: { type: Date, default: Date.now },
     updated_at: { type: Date, default: Date.now },
   },
   { collection: "app_catalog_installs" }
 );
+
+AppInstallSchema.index({ cluster_id: 1, created_at: -1 });
 
 export const AppInstallModel =
   (mongoose.models.AppInstall as mongoose.Model<IAppInstall>) ||

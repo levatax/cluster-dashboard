@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { MoreVertical, Trash2, Server } from "lucide-react";
+import { MoreVertical, Trash2, Server, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { removeCluster } from "@/app/actions/clusters";
 
 interface ClusterCardProps {
@@ -31,15 +32,15 @@ interface ClusterCardProps {
 
 export function ClusterCard({ id, name, server, createdAt }: ClusterCardProps) {
   const [loading, setLoading] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const router = useRouter();
 
-  async function handleDelete(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
+  async function handleDelete() {
     setLoading(true);
     const result = await removeCluster(id);
     if (result.success) {
       toast.success("Cluster deleted");
+      setConfirmOpen(false);
       router.refresh();
     } else {
       toast.error(result.error);
@@ -70,17 +71,21 @@ export function ClusterCard({ id, name, server, createdAt }: ClusterCardProps) {
             {/* Dropdown — hidden until hover */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild onClick={(e) => e.preventDefault()}>
-                <Button variant="ghost" size="sm" className="size-7 shrink-0 p-0 opacity-0 transition-opacity group-hover:opacity-100">
+                <Button variant="ghost" size="sm" className="size-7 shrink-0 p-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100">
                   <MoreVertical className="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem
-                  onClick={handleDelete}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setConfirmOpen(true);
+                  }}
                   disabled={loading}
                   className="text-destructive"
                 >
-                  <Trash2 className="mr-2 size-4" />
+                  {loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Trash2 className="mr-2 size-4" />}
                   Delete
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -93,6 +98,16 @@ export function ClusterCard({ id, name, server, createdAt }: ClusterCardProps) {
           </CardContent>
         </Card>
       </motion.div>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Delete Cluster"
+        description={`Are you sure you want to delete "${name}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="destructive"
+        loading={loading}
+        onConfirm={handleDelete}
+      />
     </Link>
   );
 }

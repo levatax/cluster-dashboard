@@ -11,17 +11,22 @@ interface MonitoringTabProps {
   events: ClusterEventInfo[];
   alerts: ActiveAlert[];
   onConfigureAlerts: () => void;
+  initialTypeFilter?: "all" | "Normal" | "Warning";
 }
 
 export function MonitoringTab({
   events,
   alerts,
   onConfigureAlerts,
+  initialTypeFilter,
 }: MonitoringTabProps) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">Monitoring</h3>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold">Monitoring</h2>
+          <p className="text-sm text-muted-foreground">Cluster events and active alerts</p>
+        </div>
         <Button variant="outline" size="sm" onClick={onConfigureAlerts}>
           <Settings className="mr-1 size-3.5" />
           Configure Alerts
@@ -29,7 +34,7 @@ export function MonitoringTab({
       </div>
 
       <AlertBanner alerts={alerts} />
-      <EventsTable events={events} />
+      <EventsTable events={events} initialTypeFilter={initialTypeFilter} />
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import yamlLib from "js-yaml";
+
 export interface EnvVar {
   key: string;
   value: string;
@@ -24,7 +26,7 @@ export function generateSecretManifest(
   secretData: Record<string, string>
 ): string {
   const dataYaml = Object.entries(secretData)
-    .map(([k, v]) => `  ${k}: "${v}"`)
+    .map(([k, v]) => `  ${k}: ${yamlLib.dump(v, { flowLevel: 0 }).trim()}`)
     .join("\n");
 
   return `apiVersion: v1
@@ -76,7 +78,7 @@ export function generateDeploymentManifests(config: ManifestConfig): string {
 
   // Plain env vars inline
   for (const { key, value } of plainEnvVars) {
-    allEnvEntries.push(`            - name: ${key}\n              value: "${value}"`);
+    allEnvEntries.push(`            - name: ${key}\n              value: ${yamlLib.dump(value, { flowLevel: 0 }).trim()}`);
   }
 
   // Secret env vars via secretKeyRef

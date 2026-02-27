@@ -10,6 +10,7 @@ import { ClusterCard } from "@/components/cluster-card";
 import { FadeIn, StaggerGrid, StaggerItem } from "@/components/motion-primitives";
 import { ImportDialog } from "@/components/import-dialog";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
+import { CreateClusterWizard } from "@/components/create-cluster-wizard/create-cluster-wizard";
 
 interface ClientCluster {
   id: string;
@@ -107,6 +108,7 @@ export function ClusterSearch({ clusters }: { clusters: ClientCluster[] }) {
                   clusters.
                 </p>
                 <div className="flex items-center gap-2">
+                  <CreateClusterWizard />
                   <ImportDialog />
                   <OnboardingWizard hasClusters={false} />
                 </div>

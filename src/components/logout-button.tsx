@@ -15,6 +15,7 @@ export function LogoutButton() {
       onClick={() => startTransition(() => logoutAction())}
       disabled={isPending}
       title="Sign out"
+      aria-label="Sign out"
     >
       <LogOut className="size-4" />
     </Button>

@@ -1,11 +1,13 @@
 "use server";
 
 import { getAlertConfigs, upsertAlertConfig, type AlertConfig } from "@/lib/db";
+import { requireSession } from "@/lib/auth";
 
 export async function fetchAlertConfigs(
   clusterId: string
 ): Promise<{ success: true; data: AlertConfig[] } | { success: false; error: string }> {
   try {
+    await requireSession();
     const configs = await getAlertConfigs(clusterId);
     return { success: true, data: configs };
   } catch (e) {
@@ -22,6 +24,7 @@ export async function updateAlertConfig(
   enabled: boolean
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
+    await requireSession();
     await upsertAlertConfig(clusterId, metric, warningThreshold, criticalThreshold, enabled);
     return { success: true };
   } catch (e) {

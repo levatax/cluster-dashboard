@@ -36,7 +36,7 @@ function MetricRow({
     : null;
 
   return (
-    <div className="grid items-center gap-4 border-b border-border/50 py-3 last:border-0" style={{ gridTemplateColumns: `140px repeat(${values.length}, 1fr)` }}>
+    <div className="grid items-center gap-4 border-b border-border/50 py-3 last:border-0" style={{ gridTemplateColumns: `140px repeat(${values.length}, minmax(100px, 1fr))` }}>
       <span className="text-sm text-muted-foreground">{label}</span>
       {values.map((val, i) => {
         const isBest = val !== null && val === best && numericValues.length > 1;
@@ -66,7 +66,7 @@ function PercentRow({
   const best = numericValues.length > 0 ? Math.min(...numericValues) : null;
 
   return (
-    <div className="grid items-center gap-4 border-b border-border/50 py-3 last:border-0" style={{ gridTemplateColumns: `140px repeat(${values.length}, 1fr)` }}>
+    <div className="grid items-center gap-4 border-b border-border/50 py-3 last:border-0" style={{ gridTemplateColumns: `140px repeat(${values.length}, minmax(100px, 1fr))` }}>
       <span className="text-sm text-muted-foreground">{label}</span>
       {values.map((val, i) => {
         const isBest = val !== null && val === best && numericValues.length > 1;
@@ -105,7 +105,7 @@ function PercentRow({
 
 export function ClusterCompare({ data }: ClusterCompareProps) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-x-auto">
       <FadeIn delay={0.05}>
         <Button variant="outline" size="sm" asChild>
           <Link href="/">
@@ -117,7 +117,7 @@ export function ClusterCompare({ data }: ClusterCompareProps) {
 
       {/* Cluster header cards */}
       <FadeIn delay={0.1}>
-        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${data.length}, 1fr)` }}>
+        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${data.length}, minmax(180px, 1fr))` }}>
           {data.map((cluster) => (
             <Card key={cluster.id}>
               <CardHeader className="pb-3">
@@ -160,7 +160,7 @@ export function ClusterCompare({ data }: ClusterCompareProps) {
             <CardTitle className="text-base">Cluster Info</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid items-center gap-4 border-b border-border/50 py-3" style={{ gridTemplateColumns: `140px repeat(${data.length}, 1fr)` }}>
+            <div className="grid items-center gap-4 border-b border-border/50 py-3" style={{ gridTemplateColumns: `140px repeat(${data.length}, minmax(100px, 1fr))` }}>
               <span className="text-sm text-muted-foreground">K8s Version</span>
               {data.map((c) => (
                 <span key={c.id} className="text-sm font-medium">

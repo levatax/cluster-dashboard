@@ -6,11 +6,13 @@ import { applyResourceYaml } from "@/lib/kubernetes";
 import { getTemplate, getAllTemplates } from "@/lib/templates/index";
 import type { ResourceTemplate } from "@/lib/templates/types";
 import type * as k8s from "@kubernetes/client-node";
+import { requireSession } from "@/lib/auth";
 
 type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
 export async function fetchTemplates(): Promise<ActionResult<Omit<ResourceTemplate, "generateYaml">[]>> {
   try {
+    await requireSession();
     const templates = getAllTemplates();
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const serializable = templates.map(({ generateYaml: _gen, ...rest }) => rest);
@@ -26,6 +28,7 @@ export async function createFromTemplate(
   values: Record<string, unknown>
 ): Promise<ActionResult<void>> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 
@@ -59,6 +62,7 @@ export async function previewTemplate(
   values: Record<string, unknown>
 ): Promise<ActionResult<string>> {
   try {
+    await requireSession();
     const template = getTemplate(templateId);
     if (!template) return { success: false, error: `Template "${templateId}" not found` };
     const yamlStr = template.generateYaml(values);

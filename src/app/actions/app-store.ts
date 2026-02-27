@@ -7,11 +7,13 @@ import { applyResourceYaml, deleteResource } from "@/lib/kubernetes";
 import { isHelmAvailable, helmInstall, helmUninstall } from "@/lib/helm";
 import type { CatalogApp } from "@/lib/catalog/types";
 import type * as k8s from "@kubernetes/client-node";
+import { requireSession } from "@/lib/auth";
 
 type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
 export async function fetchCatalogApps(): Promise<ActionResult<Omit<CatalogApp, "generateManifests">[]>> {
   try {
+    await requireSession();
     const apps = getAllCatalogApps();
     // Strip generateManifests function for serialization
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -24,6 +26,7 @@ export async function fetchCatalogApps(): Promise<ActionResult<Omit<CatalogApp, 
 
 export async function checkHelmAvailable(): Promise<ActionResult<boolean>> {
   try {
+    await requireSession();
     const available = await isHelmAvailable();
     return { success: true, data: available };
   } catch {
@@ -33,6 +36,7 @@ export async function checkHelmAvailable(): Promise<ActionResult<boolean>> {
 
 export async function fetchInstalledApps(clusterId: string): Promise<ActionResult<AppInstallRow[]>> {
   try {
+    await requireSession();
     const installs = await getAppInstalls(clusterId);
     return { success: true, data: installs };
   } catch (e) {
@@ -47,6 +51,7 @@ export async function installCatalogApp(
   deployMethod: "manifest" | "helm" = "manifest"
 ): Promise<ActionResult<AppInstallRow>> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 
@@ -134,6 +139,7 @@ export async function uninstallCatalogApp(
   installId: string
 ): Promise<ActionResult<void>> {
   try {
+    await requireSession();
     const cluster = await getClusterById(clusterId);
     if (!cluster) return { success: false, error: "Cluster not found" };
 

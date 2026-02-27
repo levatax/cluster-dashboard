@@ -2,12 +2,11 @@
 
 import {
   insertDeploymentTemplate,
-  getAllDeploymentTemplates,
   getDeploymentTemplatesByType,
-  getDeploymentTemplateById,
   deleteDeploymentTemplate,
   type DeploymentTemplateRow,
 } from "@/lib/db";
+import { requireSession } from "@/lib/auth";
 
 type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -32,6 +31,7 @@ export async function saveDeploymentTemplate(
   catalogAppId?: string
 ): Promise<ActionResult<DeploymentTemplateRow>> {
   try {
+    await requireSession();
     if (!name.trim()) {
       return { success: false, error: "Template name is required" };
     }
@@ -50,19 +50,11 @@ export async function saveDeploymentTemplate(
   }
 }
 
-export async function fetchAllTemplates(): Promise<ActionResult<DeploymentTemplateRow[]>> {
-  try {
-    const templates = await getAllDeploymentTemplates();
-    return { success: true, data: templates };
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Failed to fetch templates" };
-  }
-}
-
 export async function fetchTemplatesByType(
   sourceType: "github" | "app_catalog"
 ): Promise<ActionResult<DeploymentTemplateRow[]>> {
   try {
+    await requireSession();
     const templates = await getDeploymentTemplatesByType(sourceType);
     return { success: true, data: templates };
   } catch (e) {
@@ -70,22 +62,9 @@ export async function fetchTemplatesByType(
   }
 }
 
-export async function fetchTemplateById(
-  id: string
-): Promise<ActionResult<DeploymentTemplateRow>> {
-  try {
-    const template = await getDeploymentTemplateById(id);
-    if (!template) {
-      return { success: false, error: "Template not found" };
-    }
-    return { success: true, data: template };
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Failed to fetch template" };
-  }
-}
-
 export async function removeTemplate(id: string): Promise<ActionResult<void>> {
   try {
+    await requireSession();
     await deleteDeploymentTemplate(id);
     return { success: true, data: undefined };
   } catch (e) {

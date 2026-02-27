@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { updateAlertConfig } from "@/app/actions/alerts";
 import type { AlertConfig } from "@/lib/db";
@@ -82,20 +84,20 @@ export function AlertConfigDialog({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-medium text-sm">CPU Usage</span>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="cpu-enabled"
                   checked={cpu.enabled}
-                  onChange={(e) => setCpu({ ...cpu, enabled: e.target.checked })}
-                  className="rounded"
+                  onCheckedChange={(checked) => setCpu({ ...cpu, enabled: !!checked })}
                 />
-                Enabled
-              </label>
+                <Label htmlFor="cpu-enabled" className="text-sm">Enabled</Label>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-muted-foreground text-xs">Warning (%)</label>
+                <Label htmlFor="cpu-warning" className="text-muted-foreground text-xs">Warning (%)</Label>
                 <Input
+                  id="cpu-warning"
                   type="number"
                   min={0}
                   max={100}
@@ -105,8 +107,9 @@ export function AlertConfigDialog({
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-muted-foreground text-xs">Critical (%)</label>
+                <Label htmlFor="cpu-critical" className="text-muted-foreground text-xs">Critical (%)</Label>
                 <Input
+                  id="cpu-critical"
                   type="number"
                   min={0}
                   max={100}
@@ -121,20 +124,20 @@ export function AlertConfigDialog({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-medium text-sm">Memory Usage</span>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="memory-enabled"
                   checked={memory.enabled}
-                  onChange={(e) => setMemory({ ...memory, enabled: e.target.checked })}
-                  className="rounded"
+                  onCheckedChange={(checked) => setMemory({ ...memory, enabled: !!checked })}
                 />
-                Enabled
-              </label>
+                <Label htmlFor="memory-enabled" className="text-sm">Enabled</Label>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-muted-foreground text-xs">Warning (%)</label>
+                <Label htmlFor="memory-warning" className="text-muted-foreground text-xs">Warning (%)</Label>
                 <Input
+                  id="memory-warning"
                   type="number"
                   min={0}
                   max={100}
@@ -144,8 +147,9 @@ export function AlertConfigDialog({
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-muted-foreground text-xs">Critical (%)</label>
+                <Label htmlFor="memory-critical" className="text-muted-foreground text-xs">Critical (%)</Label>
                 <Input
+                  id="memory-critical"
                   type="number"
                   min={0}
                   max={100}

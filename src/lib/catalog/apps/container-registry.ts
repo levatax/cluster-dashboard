@@ -13,7 +13,7 @@ export const containerRegistry: CatalogApp = {
     { name: "namespace", label: "Namespace", type: "text", default: "registry", required: true },
     { name: "releaseName", label: "Release Name", type: "text", default: "container-registry", required: true },
     { name: "storageSize", label: "Storage Size (Gi)", type: "number", default: 20, min: 5, max: 500 },
-    { name: "nodePort", label: "Node Port (0 = ClusterIP only)", type: "number", default: 0, min: 0, max: 32767 },
+    { name: "nodePort", label: "Node Port", type: "number", default: 30500, description: "NodePort so nodes can pull images (required for in-cluster builds)", min: 30000, max: 32767 },
   ],
   generateManifests: (config) => {
     const ns = config.namespace as string || "registry";

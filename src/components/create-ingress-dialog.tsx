@@ -1,15 +1,23 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Loader2, Check, ChevronsUpDown, Star } from "lucide-react";
+import {
+  Loader2,
+  Check,
+  ChevronsUpDown,
+  Star,
+  Globe,
+  ArrowRight,
+  Lock,
+  Settings2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,7 +41,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -59,10 +68,33 @@ interface CreateIngressDialogProps {
   onSuccess?: () => void;
 }
 
-// Extract the first numeric port from a ports string like "80/TCP, 443:30080/TCP"
 function extractFirstPort(ports: string): string {
   const match = ports.match(/(\d+)/);
   return match ? match[1] : "80";
+}
+
+function SectionHeader({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: React.ElementType;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <div className="flex items-start gap-2.5 pb-3 border-b">
+      <div className="mt-0.5 rounded-md bg-muted p-1.5 flex-shrink-0">
+        <Icon className="size-3.5 text-muted-foreground" />
+      </div>
+      <div>
+        <p className="text-sm font-medium leading-none">{title}</p>
+        {description && (
+          <p className="text-xs text-muted-foreground mt-1">{description}</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function CreateIngressDialog({
@@ -93,15 +125,13 @@ export function CreateIngressDialog({
   const [tlsEnabled, setTlsEnabled] = useState(false);
   const [tlsSecret, setTlsSecret] = useState("");
 
-  // Group services by namespace
   const groupedServices = useMemo(() => {
     const groups: Record<string, ServiceInfo[]> = {};
     svcs.forEach((svc) => {
-      const ns = svc.namespace || "default";
-      if (!groups[ns]) groups[ns] = [];
-      groups[ns].push(svc);
+      const n = svc.namespace || "default";
+      if (!groups[n]) groups[n] = [];
+      groups[n].push(svc);
     });
-    // Sort namespaces and services within each group
     return Object.entries(groups)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([namespace, services]) => ({
@@ -110,14 +140,17 @@ export function CreateIngressDialog({
       }));
   }, [svcs]);
 
-  // Combined service value for display
   const selectedServiceDisplay = serviceName
     ? serviceNamespace
       ? `${serviceNamespace}/${serviceName}`
       : serviceName
     : "";
 
-  // Reset form and fetch data each time the dialog opens
+  // Live URL preview
+  const previewUrl = host
+    ? `${tlsEnabled ? "https" : "http"}://${host.trim()}${path !== "/" ? path : ""}`
+    : null;
+
   useEffect(() => {
     if (!open) return;
     setName("");
@@ -132,16 +165,13 @@ export function CreateIngressDialog({
     setTlsEnabled(false);
     setTlsSecret("");
 
-    // Fetch services (all namespaces for better selection)
     setLoadingSvcs(true);
     fetchServices(clusterId)
       .then((r) => {
-        if (r.success)
-          setSvcs(r.data.filter((s) => s.name !== "kubernetes"));
+        if (r.success) setSvcs(r.data.filter((s) => s.name !== "kubernetes"));
       })
       .finally(() => setLoadingSvcs(false));
 
-    // Fetch namespaces
     setLoadingNs(true);
     fetchNamespaces(clusterId)
       .then((r) => {
@@ -149,13 +179,11 @@ export function CreateIngressDialog({
       })
       .finally(() => setLoadingNs(false));
 
-    // Fetch ingress classes
     setLoadingClasses(true);
     fetchIngressClasses(clusterId)
       .then((r) => {
         if (r.success) {
           setIngressClasses(r.data);
-          // Auto-select default class if available
           const defaultClass = r.data.find((c) => c.isDefault);
           if (defaultClass) setIngressClass(defaultClass.name);
         }
@@ -165,7 +193,6 @@ export function CreateIngressDialog({
 
   function handleHostChange(value: string) {
     setHost(value);
-    // Auto-suggest a name from the first label of the hostname
     if (!name) {
       const suggested = value
         .split(".")[0]
@@ -179,7 +206,6 @@ export function CreateIngressDialog({
     setServiceName(svc.name);
     setServiceNamespace(svc.namespace);
     if (svc.ports) setServicePort(extractFirstPort(svc.ports));
-    // Auto-set namespace to match service namespace
     if (svc.namespace) setNs(svc.namespace);
     setServiceOpen(false);
   }
@@ -268,131 +294,213 @@ export function CreateIngressDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Add Ingress</DialogTitle>
-          <DialogDescription>
-            Route a domain to a Kubernetes service.
+      <DialogContent className="flex flex-col gap-0 p-0 sm:max-w-[560px] max-h-[90vh]">
+        {/* Header */}
+        <DialogHeader className="px-6 pt-6 pb-4 border-b flex-shrink-0">
+          <DialogTitle className="text-base">Add Ingress</DialogTitle>
+          <DialogDescription className="text-sm">
+            Route an external domain to a Kubernetes service.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-1">
-          {/* Domain */}
-          <div className="space-y-1.5">
-            <Label htmlFor="ci-host">Domain *</Label>
-            <Input
-              id="ci-host"
-              placeholder="wordpress.example.com"
-              value={host}
-              onChange={(e) => handleHostChange(e.target.value)}
-            />
-          </div>
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6 min-h-0">
 
-          {/* Service with search and grouping */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* ── Section 1: Routing ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Globe}
+              title="Routing"
+              description="Where traffic comes from and where it goes"
+            />
+
+            {/* Domain */}
             <div className="space-y-1.5">
-              <Label>Service *</Label>
-              {loadingSvcs ? (
-                <div className="flex h-9 items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="size-3.5 animate-spin" /> Loading…
-                </div>
-              ) : svcs.length > 0 ? (
-                <Popover open={serviceOpen} onOpenChange={setServiceOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={serviceOpen}
-                      className="w-full justify-between font-normal"
-                    >
-                      <span className="truncate">
-                        {selectedServiceDisplay || "Select service…"}
-                      </span>
-                      <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[300px] p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Search services…" />
-                      <CommandList>
-                        <CommandEmpty>No services found.</CommandEmpty>
-                        {groupedServices.map((group) => (
-                          <CommandGroup
-                            key={group.namespace}
-                            heading={group.namespace}
-                          >
-                            {group.services.map((svc) => (
-                              <CommandItem
-                                key={`${svc.namespace}/${svc.name}`}
-                                value={`${svc.namespace}/${svc.name}`}
-                                onSelect={() => handleServiceChange(svc)}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 size-4",
-                                    serviceName === svc.name &&
-                                      serviceNamespace === svc.namespace
-                                      ? "opacity-100"
-                                      : "opacity-0"
-                                  )}
-                                />
-                                <span className="flex-1 truncate">
-                                  {svc.name}
-                                </span>
-                                <span className="ml-2 text-xs text-muted-foreground">
-                                  {svc.ports?.split(",")[0] || ""}
-                                </span>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        ))}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                <Input
-                  placeholder="e.g. wordpress"
-                  value={serviceName}
-                  onChange={(e) => setServiceName(e.target.value)}
-                />
+              <Label htmlFor="ci-host">
+                Domain <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="ci-host"
+                placeholder="app.example.com"
+                value={host}
+                onChange={(e) => handleHostChange(e.target.value)}
+                autoComplete="off"
+                autoFocus
+              />
+              {previewUrl && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <ArrowRight className="size-3 flex-shrink-0" />
+                  <span className="font-mono truncate">{previewUrl}</span>
+                </p>
               )}
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ci-port">Port *</Label>
-              <Input
-                id="ci-port"
-                type="number"
-                placeholder="80"
-                value={servicePort}
-                onChange={(e) => setServicePort(e.target.value)}
-              />
-            </div>
-          </div>
 
-          {/* Namespace + Ingress class */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Namespace</Label>
-              {loadingNs ? (
-                <div className="flex h-9 items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="size-3.5 animate-spin" /> Loading…
-                </div>
-              ) : (
-                <Select value={ns} onValueChange={setNs}>
+            {/* Service + Port */}
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_96px] gap-3">
+              <div className="space-y-1.5">
+                <Label>
+                  Service <span className="text-destructive">*</span>
+                </Label>
+                {loadingSvcs ? (
+                  <div className="flex h-9 items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin" /> Loading services…
+                  </div>
+                ) : svcs.length > 0 ? (
+                  <Popover open={serviceOpen} onOpenChange={setServiceOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={serviceOpen}
+                        className="w-full justify-between font-normal"
+                      >
+                        <span className="truncate">
+                          {selectedServiceDisplay || "Select service…"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search services…" />
+                        <CommandList className="max-h-48">
+                          <CommandEmpty>No services found.</CommandEmpty>
+                          {groupedServices.map((group) => (
+                            <CommandGroup
+                              key={group.namespace}
+                              heading={group.namespace}
+                            >
+                              {group.services.map((svc) => (
+                                <CommandItem
+                                  key={`${svc.namespace}/${svc.name}`}
+                                  value={`${svc.namespace}/${svc.name}`}
+                                  onSelect={() => handleServiceChange(svc)}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 size-4 flex-shrink-0",
+                                      serviceName === svc.name &&
+                                        serviceNamespace === svc.namespace
+                                        ? "opacity-100"
+                                        : "opacity-0"
+                                    )}
+                                  />
+                                  <span className="flex-1 truncate">
+                                    {svc.name}
+                                  </span>
+                                  <span className="ml-2 text-xs text-muted-foreground font-mono flex-shrink-0">
+                                    {svc.ports?.split(",")[0] || ""}
+                                  </span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          ))}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                ) : (
+                  <Input
+                    placeholder="e.g. my-app"
+                    value={serviceName}
+                    onChange={(e) => setServiceName(e.target.value)}
+                  />
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="ci-port">
+                  Port <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="ci-port"
+                  type="number"
+                  placeholder="80"
+                  value={servicePort}
+                  onChange={(e) => setServicePort(e.target.value)}
+                  min={1}
+                  max={65535}
+                />
+              </div>
+            </div>
+
+            {/* Path + PathType */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="ci-path">Path</Label>
+                <Input
+                  id="ci-path"
+                  placeholder="/"
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Path Type</Label>
+                <Select value={pathType} onValueChange={setPathType}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select namespace" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {namespaces.map((namespace) => (
-                      <SelectItem key={namespace} value={namespace}>
-                        {namespace}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="Prefix">Prefix</SelectItem>
+                    <SelectItem value="Exact">Exact</SelectItem>
+                    <SelectItem value="ImplementationSpecific">ImplementationSpecific</SelectItem>
                   </SelectContent>
                 </Select>
-              )}
+              </div>
             </div>
+          </div>
+
+          {/* ── Section 2: Configuration ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Settings2}
+              title="Configuration"
+              description="Metadata and controller settings"
+            />
+
+            {/* Name + Namespace */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="ci-name">
+                  Ingress Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="ci-name"
+                  placeholder="my-app-ingress"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+                {host && !name && (
+                  <p className="text-xs text-muted-foreground">
+                    Auto-fills from domain
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Namespace</Label>
+                {loadingNs ? (
+                  <div className="flex h-9 items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin" /> Loading…
+                  </div>
+                ) : (
+                  <Select value={ns} onValueChange={setNs}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select namespace" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {namespaces.map((n) => (
+                        <SelectItem key={n} value={n}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
+
+            {/* Ingress Class */}
             <div className="space-y-1.5">
               <Label>Ingress Class</Label>
               {loadingClasses ? (
@@ -410,7 +518,9 @@ export function CreateIngressDialog({
                         <span className="flex items-center gap-2">
                           {ic.name}
                           {ic.isDefault && (
-                            <Star className="size-3 fill-amber-400 text-amber-400" />
+                            <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4">
+                              default
+                            </Badge>
                           )}
                         </span>
                       </SelectItem>
@@ -427,82 +537,69 @@ export function CreateIngressDialog({
             </div>
           </div>
 
-          {/* Path */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="ci-path">Path</Label>
-              <Input
-                id="ci-path"
-                placeholder="/"
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
+          {/* ── Section 3: TLS ── */}
+          <div className="space-y-4">
+            <SectionHeader
+              icon={Lock}
+              title="TLS / HTTPS"
+              description="Terminate SSL at the ingress controller"
+            />
+
+            <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+              <div>
+                <p className="text-sm font-medium">Enable TLS</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Redirect HTTP to HTTPS and terminate SSL
+                </p>
+              </div>
+              <Switch
+                id="ci-tls"
+                checked={tlsEnabled}
+                onCheckedChange={setTlsEnabled}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Path Type</Label>
-              <Select value={pathType} onValueChange={setPathType}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Prefix">Prefix</SelectItem>
-                  <SelectItem value="Exact">Exact</SelectItem>
-                  <SelectItem value="ImplementationSpecific">
-                    ImplementationSpecific
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
 
-          {/* TLS */}
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="ci-tls"
-              checked={tlsEnabled}
-              onCheckedChange={(v) => setTlsEnabled(!!v)}
-            />
-            <Label htmlFor="ci-tls" className="cursor-pointer">
-              Enable TLS (HTTPS)
-            </Label>
-          </div>
-          {tlsEnabled && (
-            <div className="space-y-1.5">
-              <Label htmlFor="ci-tls-secret">TLS Secret Name</Label>
-              <Input
-                id="ci-tls-secret"
-                placeholder="e.g. wordpress-tls (leave blank to omit)"
-                value={tlsSecret}
-                onChange={(e) => setTlsSecret(e.target.value)}
-              />
-            </div>
-          )}
-
-          {/* Name */}
-          <div className="space-y-1.5">
-            <Label htmlFor="ci-name">Ingress Name *</Label>
-            <Input
-              id="ci-name"
-              placeholder="e.g. wordpress-ingress"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+            {tlsEnabled && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ci-tls-secret">TLS Secret Name</Label>
+                <Input
+                  id="ci-tls-secret"
+                  placeholder="my-app-tls  (optional — leave blank to omit)"
+                  value={tlsSecret}
+                  onChange={(e) => setTlsSecret(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Name of the Kubernetes Secret containing the TLS certificate. Leave blank if managed by cert-manager.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={saving}
-          >
-            Cancel
-          </Button>
-          <Button onClick={handleCreate} disabled={saving}>
-            {saving && <Loader2 className="mr-1 size-3.5 animate-spin" />}
-            Create Ingress
-          </Button>
-        </DialogFooter>
+        {/* Sticky footer */}
+        <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t bg-muted/30">
+          {previewUrl ? (
+            <span className="text-xs text-muted-foreground font-mono truncate hidden sm:block">
+              {previewUrl}
+            </span>
+          ) : (
+            <span />
+          )}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleCreate} disabled={saving}>
+              {saving && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
+              Create Ingress
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

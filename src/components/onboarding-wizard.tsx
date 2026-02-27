@@ -112,6 +112,8 @@ export function OnboardingWizard({ hasClusters }: OnboardingWizardProps) {
             {steps.map((s, i) => (
               <div key={s.id} className="flex items-center gap-2">
                 <div
+                  aria-label={`Step ${i + 1}: ${s.title}`}
+                  aria-current={i === step ? "step" : undefined}
                   className={`flex size-7 items-center justify-center rounded-full text-xs font-semibold transition-colors ${
                     i === step
                       ? "bg-primary text-primary-foreground"
@@ -270,13 +272,18 @@ export function OnboardingWizard({ hasClusters }: OnboardingWizardProps) {
                   <ChevronRight className="ml-1 size-3.5" />
                 </Button>
               ) : (
-                <Button
-                  size="sm"
-                  onClick={handleImport}
-                  disabled={loading || !yaml.trim()}
-                >
-                  {loading ? "Importing..." : "Import Cluster"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  {!yaml.trim() && (
+                    <p className="text-xs text-muted-foreground">Paste your kubeconfig above to continue.</p>
+                  )}
+                  <Button
+                    size="sm"
+                    onClick={handleImport}
+                    disabled={loading || !yaml.trim()}
+                  >
+                    {loading ? "Importing..." : "Import Cluster"}
+                  </Button>
+                </div>
               )}
             </div>
           </DialogFooter>

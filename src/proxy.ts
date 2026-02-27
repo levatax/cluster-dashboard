@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessTokenEdge } from "@/lib/auth-edge";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/refresh"];
+const PUBLIC_PATHS = ["/login", "/api/auth/refresh", "/api/auth/refresh-redirect"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -20,10 +20,17 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = request.cookies.get("access_token")?.value;
+  const accessToken = request.cookies.get("access_token")?.value;
+  const refreshToken = request.cookies.get("refresh_token")?.value;
 
-  if (!token) {
-    // API routes get 401, pages get redirected
+  if (!accessToken) {
+    // No access token — try refresh if refresh token exists
+    if (refreshToken && !pathname.startsWith("/api/")) {
+      const refreshUrl = new URL("/api/auth/refresh-redirect", request.url);
+      refreshUrl.searchParams.set("returnTo", pathname + request.nextUrl.search);
+      return NextResponse.redirect(refreshUrl);
+    }
+
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -31,10 +38,16 @@ export async function proxy(request: NextRequest) {
   }
 
   try {
-    await verifyAccessTokenEdge(token);
+    await verifyAccessTokenEdge(accessToken);
     return NextResponse.next();
   } catch {
-    // Token expired or invalid
+    // Access token expired or invalid — try refresh if refresh token exists
+    if (refreshToken && !pathname.startsWith("/api/")) {
+      const refreshUrl = new URL("/api/auth/refresh-redirect", request.url);
+      refreshUrl.searchParams.set("returnTo", pathname + request.nextUrl.search);
+      return NextResponse.redirect(refreshUrl);
+    }
+
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -43,7 +56,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    "/((?!_next/static|_next/image|favicon.ico).*)",
-  ],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

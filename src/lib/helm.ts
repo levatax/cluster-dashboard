@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { writeFile, unlink, mkdtemp } from "node:fs/promises";
+import { writeFile, rm, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -32,7 +32,7 @@ async function withTempKubeconfig<T>(kubeconfigYaml: string, fn: (path: string) 
   try {
     return await fn(filePath);
   } finally {
-    await unlink(filePath).catch(() => {});
+    await rm(dir, { recursive: true }).catch(() => {});
   }
 }
 
@@ -84,8 +84,20 @@ export async function helmInstall(opts: HelmInstallOptions): Promise<string> {
     }
 
     if (opts.values && Object.keys(opts.values).length > 0) {
-      for (const [key, val] of Object.entries(opts.values)) {
-        args.push("--set", `${key}=${String(val)}`);
+      // Write values to a temp YAML file to avoid --set parsing issues
+      // (commas, backslashes, special chars are misinterpreted by --set)
+      const valuesDir = await mkdtemp(path.join(tmpdir(), "helm-values-"));
+      const valuesPath = path.join(valuesDir, "values.yaml");
+      const yaml = Object.entries(opts.values)
+        .map(([key, val]) => `${key}: ${JSON.stringify(val)}`)
+        .join("\n");
+      await writeFile(valuesPath, yaml, { mode: 0o600 });
+      args.push("--values", valuesPath);
+      try {
+        const { stdout } = await exec("helm", args, 120_000);
+        return stdout;
+      } finally {
+        await rm(valuesDir, { recursive: true }).catch(() => {});
       }
     }
 

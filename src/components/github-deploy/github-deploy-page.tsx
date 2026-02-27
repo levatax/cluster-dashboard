@@ -3,8 +3,12 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import { RepoInputForm } from "./repo-input-form";
 import { DeployPreview } from "./deploy-preview";
+import { RegistrySetupWizard } from "./registry-setup-wizard";
 import { DeployConfigEditor } from "./deploy-config-editor";
 import { GithubDeploymentsList } from "./github-deployments-list";
 import { BuildProgress } from "./build-progress";
@@ -21,10 +25,32 @@ import {
   getBuildLogsAction,
   type RepoAnalysis,
 } from "@/app/actions/github-deploy";
-import { fetchClusterRegistryUrl, updateClusterRegistryUrl } from "@/app/actions/kubernetes";
-import { Loader2, Rocket, Hammer, AlertTriangle, Save, CheckCircle2, FileCode2 } from "lucide-react";
+import { fetchClusterRegistryUrl } from "@/app/actions/kubernetes";
+import { Loader2, Rocket, Hammer, FileCode2, GitBranch, Settings2, Globe } from "lucide-react";
 import { toast } from "sonner";
 import type { GithubDeploymentRow } from "@/lib/db";
+
+// ─── Section label ────────────────────────────────────────────────────────────
+
+function SectionLabel({
+  icon: Icon,
+  title,
+}: {
+  icon: React.ElementType;
+  title: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted">
+        <Icon className="size-3.5 text-muted-foreground" />
+      </div>
+      <span className="text-sm font-medium">{title}</span>
+      <Separator className="flex-1" />
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 interface GithubDeployPageProps {
   clusterId: string;
@@ -52,22 +78,16 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
     envVars: [] as { key: string; value: string; isSecret: boolean }[],
   });
 
-  // Registry state
   const [registryUrl, setRegistryUrl] = useState<string | null>(null);
-  const [registryInput, setRegistryInput] = useState("");
-  const [savingRegistry, setSavingRegistry] = useState(false);
-
-  // Build state
   const [buildPhase, setBuildPhase] = useState<BuildPhase>("idle");
   const [buildJobName, setBuildJobName] = useState("");
   const [buildImage, setBuildImage] = useState("");
   const [buildLogs, setBuildLogs] = useState("");
   const [buildMessage, setBuildMessage] = useState("");
-
-  // Template dialogs
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [templateSelectorOpen, setTemplateSelectorOpen] = useState(false);
-  const [lastDeployedConfig, setLastDeployedConfig] = useState<DeploymentTemplateConfig | null>(null);
+  const [lastDeployedConfig, setLastDeployedConfig] =
+    useState<DeploymentTemplateConfig | null>(null);
 
   const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -82,18 +102,22 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
       if (r.success) setDeployments(r.data);
     });
     fetchClusterRegistryUrl(clusterId).then((r) => {
-      if (r.success) { setRegistryUrl(r.data); setRegistryInput(r.data ?? ""); }
+      if (r.success) setRegistryUrl(r.data);
     });
   }, [clusterId]);
 
   useEffect(() => () => stopPolling(), []);
 
-  // Derived values
   const isDockerfile = analysis?.deployType.type === "dockerfile";
   const hasBuildMode = isDockerfile && !!registryUrl;
   const needsImage = analysis?.deployType.type !== "kubernetes-manifests";
   const needsManualImage = needsImage && !hasBuildMode;
-  const canDeploy = analysis && config.name && buildPhase !== "building" && (needsManualImage ? config.image : true);
+  const showConfig = !!analysis && analysis.deployType.type !== "kubernetes-manifests";
+  const canDeploy =
+    analysis &&
+    config.name &&
+    buildPhase !== "building" &&
+    (needsManualImage ? config.image : true);
 
   async function handleAnalyze(url: string, branch: string, token: string | null) {
     setAnalyzing(true);
@@ -126,7 +150,8 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
     setDeploying(true);
 
     const deployType = analysis.deployType;
-    const manifestPaths = deployType.type === "kubernetes-manifests" ? deployType.paths : undefined;
+    const manifestPaths =
+      deployType.type === "kubernetes-manifests" ? deployType.paths : undefined;
     const imageToUse = imageOverride || config.image;
 
     const result = await deployFromGithub(clusterId, repoUrl, repoBranch, repoToken, {
@@ -142,7 +167,6 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
     });
 
     if (result.success) {
-      // Store config for potential template save
       const deployedConfig: DeploymentTemplateConfig = {
         name: config.name,
         namespace: config.namespace,
@@ -197,11 +221,9 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
     setBuildJobName(jobName);
     setBuildImage(image);
 
-    // Poll status every 3s
     statusPollRef.current = setInterval(async () => {
       const statusResult = await getBuildStatusAction(clusterId, config.namespace, jobName);
       if (!statusResult.success) return;
-
       const { phase } = statusResult.data;
       if (phase === "succeeded") {
         stopPolling();
@@ -214,7 +236,6 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
       }
     }, 3000);
 
-    // Poll logs every 5s
     logsPollRef.current = setInterval(async () => {
       const logsResult = await getBuildLogsAction(clusterId, config.namespace, jobName);
       if (logsResult.success) setBuildLogs(logsResult.data);
@@ -222,24 +243,8 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
   }
 
   async function handleDeploy() {
-    if (hasBuildMode) {
-      await handleBuildAndDeploy();
-    } else {
-      await runDeploy();
-    }
-  }
-
-  async function handleSaveRegistry() {
-    setSavingRegistry(true);
-    const urlToSave = registryInput.trim() || null;
-    const result = await updateClusterRegistryUrl(clusterId, urlToSave);
-    if (result.success) {
-      setRegistryUrl(urlToSave);
-      toast.success("Registry URL saved");
-    } else {
-      toast.error(result.error);
-    }
-    setSavingRegistry(false);
+    if (hasBuildMode) await handleBuildAndDeploy();
+    else await runDeploy();
   }
 
   async function handleRemove(id: string) {
@@ -254,7 +259,6 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
   }
 
   function handleTemplateSelect(templateConfig: DeploymentTemplateConfig) {
-    // Pre-fill the form from template
     setConfig({
       name: templateConfig.name,
       namespace: templateConfig.namespace,
@@ -266,7 +270,6 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
       envVars: templateConfig.envVars || [],
     });
 
-    // If template has repo URL, trigger analysis
     if (templateConfig.repoUrl) {
       setRepoUrl(templateConfig.repoUrl);
       setRepoBranch(templateConfig.branch || "main");
@@ -276,135 +279,153 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
     toast.success("Template loaded");
   }
 
-  // suppress unused warning — buildJobName used for polling identity
   void buildJobName;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Deploy from GitHub</h2>
+          <h2 className="text-base font-semibold">Deploy from GitHub</h2>
           <p className="text-sm text-muted-foreground">
-            Enter a GitHub repository URL to analyze and deploy
+            Analyze a repository and deploy it to this cluster
           </p>
         </div>
         <Button
           variant="outline"
           size="sm"
+          className="h-8 text-xs"
           onClick={() => setTemplateSelectorOpen(true)}
         >
-          <FileCode2 className="mr-1.5 size-4" />
+          <FileCode2 className="mr-1.5 size-3.5" />
           Use Template
         </Button>
       </div>
 
-      <RepoInputForm onAnalyze={handleAnalyze} loading={analyzing} />
+      {/* ── Deploy form ──────────────────────────────────────────────────────── */}
+      <div className="space-y-6">
 
-      {analysis && (
+        {/* Section: Repository */}
         <div className="space-y-4">
-          <DeployPreview analysis={analysis} />
-
-          {/* Registry setup prompt for Dockerfile repos without registry configured */}
-          {isDockerfile && !registryUrl && (
-            <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-4 space-y-3">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="size-4 text-yellow-500 mt-0.5 shrink-0" />
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
-                    Registry not configured
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    To build the image in-cluster, install Container Registry from the App Store and configure
-                    containerd on each node to pull from it. Then enter the registry service URL below.
-                    Without a registry, supply the image URL manually.
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  value={registryInput}
-                  onChange={(e) => setRegistryInput(e.target.value)}
-                  placeholder="container-registry.registry.svc.cluster.local:5000"
-                  className="flex-1 font-mono text-xs"
+          <SectionLabel icon={GitBranch} title="Repository" />
+          <RepoInputForm onAnalyze={handleAnalyze} loading={analyzing} />
+          {analysis && (
+            <>
+              <DeployPreview analysis={analysis} />
+              {isDockerfile && (
+                <RegistrySetupWizard
+                  clusterId={clusterId}
+                  registryUrl={registryUrl}
+                  onRegistryConfigured={(url) => setRegistryUrl(url)}
                 />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleSaveRegistry}
-                  disabled={savingRegistry || !registryInput.trim()}
-                >
-                  {savingRegistry ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Save className="size-3.5 mr-1" />
-                  )}
-                  Save
-                </Button>
-              </div>
-            </div>
+              )}
+            </>
           )}
+        </div>
 
-          {/* Registry configured indicator */}
-          {isDockerfile && registryUrl && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <CheckCircle2 className="size-3.5 text-green-500" />
-              <span>Building to: <span className="font-mono text-foreground">{registryUrl}</span></span>
-              <button
-                className="underline ml-1 hover:text-foreground transition-colors"
-                onClick={() => { setRegistryUrl(null); setRegistryInput(registryUrl ?? ""); }}
-              >
-                Change
-              </button>
-            </div>
-          )}
-
-          {analysis.deployType.type !== "kubernetes-manifests" && (
+        {/* Section: Configuration (after analysis, non-manifests only) */}
+        {showConfig && (
+          <div className="space-y-4">
+            <SectionLabel icon={Settings2} title="Configuration" />
             <DeployConfigEditor
               clusterId={clusterId}
               config={config}
               onChange={setConfig}
               showImage={needsImage}
               buildMode={hasBuildMode}
+              showIngress={false}
             />
-          )}
+          </div>
+        )}
 
-          {isDockerfile && hasBuildMode && (
-            <BuildProgress
-              phase={buildPhase}
-              logs={buildLogs}
-              image={buildImage}
-              message={buildMessage}
-            />
-          )}
+        {/* Section: Ingress (after analysis, non-manifests only) */}
+        {showConfig && (
+          <div className="space-y-4">
+            <SectionLabel icon={Globe} title="Ingress" />
 
-          <Button
-            onClick={handleDeploy}
-            disabled={deploying || !canDeploy}
-            className="w-full"
-          >
-            {buildPhase === "building" || deploying ? (
-              <Loader2 className="mr-1.5 size-4 animate-spin" />
-            ) : hasBuildMode ? (
-              <Hammer className="mr-1.5 size-4" />
-            ) : (
-              <Rocket className="mr-1.5 size-4" />
+            <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+              <div>
+                <p className="text-sm font-medium">Enable Ingress</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Expose this app via an HTTP/S domain
+                </p>
+              </div>
+              <Switch
+                checked={config.ingressEnabled}
+                onCheckedChange={(v) => setConfig((prev) => ({ ...prev, ingressEnabled: v }))}
+              />
+            </div>
+
+            {config.ingressEnabled && (
+              <div className="space-y-1.5">
+                <Label htmlFor="gh-ingress-host">Ingress Host</Label>
+                <Input
+                  id="gh-ingress-host"
+                  value={config.ingressHost}
+                  onChange={(e) =>
+                    setConfig((prev) => ({ ...prev, ingressHost: e.target.value }))
+                  }
+                  placeholder="app.example.com"
+                />
+              </div>
             )}
-            {buildPhase === "building"
-              ? "Building..."
-              : deploying
-              ? "Deploying..."
-              : hasBuildMode
-              ? "Build & Deploy"
-              : "Deploy"}
-          </Button>
-        </div>
-      )}
+          </div>
+        )}
 
+        {/* Build progress (Dockerfile + registry mode) */}
+        {analysis && isDockerfile && hasBuildMode && (
+          <BuildProgress
+            phase={buildPhase}
+            logs={buildLogs}
+            image={buildImage}
+            message={buildMessage}
+          />
+        )}
+
+        {/* Deploy button */}
+        {analysis && (
+          <div className="flex justify-end">
+            <Button
+              onClick={handleDeploy}
+              disabled={deploying || !canDeploy}
+            >
+              {buildPhase === "building" || deploying ? (
+                <Loader2 className="mr-1.5 size-4 animate-spin" />
+              ) : hasBuildMode ? (
+                <Hammer className="mr-1.5 size-4" />
+              ) : (
+                <Rocket className="mr-1.5 size-4" />
+              )}
+              {buildPhase === "building"
+                ? "Building…"
+                : deploying
+                ? "Deploying…"
+                : hasBuildMode
+                ? "Build & Deploy"
+                : "Deploy"}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Previous deployments ──────────────────────────────────────────────── */}
       {deployments.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-muted-foreground">Previous Deployments</h3>
-          <GithubDeploymentsList deployments={deployments} onRemove={handleRemove} />
-        </div>
+        <>
+          <div className="border-t" />
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold">Previous Deployments</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Deployments made from GitHub on this cluster
+              </p>
+            </div>
+            <GithubDeploymentsList
+              deployments={deployments}
+              onRemove={handleRemove}
+            />
+          </div>
+        </>
       )}
 
       {/* Template dialogs */}

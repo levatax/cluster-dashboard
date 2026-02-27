@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import * as k8s from "@kubernetes/client-node";
 import { getClusterById } from "@/lib/db";
+import { verifyTerminalToken } from "@/lib/auth";
 import { Writable, Readable } from "node:stream";
 
 let wss: WebSocketServer | null = null;
@@ -17,9 +18,15 @@ export function startTerminalServer(port = 3001) {
     const namespace = url.searchParams.get("namespace") || "default";
     const pod = url.searchParams.get("pod") || "";
     const container = url.searchParams.get("container") || "";
+    const token = url.searchParams.get("token") || "";
 
     if (!clusterId || !pod) {
       ws.close(1008, "Missing required parameters");
+      return;
+    }
+
+    if (!token || !verifyTerminalToken(token, clusterId, pod, namespace)) {
+      ws.close(1008, "Unauthorized");
       return;
     }
 

@@ -15,15 +15,15 @@ import type { NodeMetricsInfo } from "@/lib/types";
 const ease = [0.25, 0.46, 0.45, 0.94] as const;
 
 function getColor(percent: number): string {
-  if (percent >= 85) return "hsl(0 84% 60%)"; // red
-  if (percent >= 70) return "hsl(38 92% 50%)"; // amber
-  return "hsl(142 76% 36%)"; // green
+  if (percent >= 85) return "var(--color-destructive)";
+  if (percent >= 70) return "var(--color-warning, hsl(38 92% 50%))";
+  return "var(--color-success, hsl(142 76% 36%))";
 }
 
 function getTrackColor(percent: number): string {
-  if (percent >= 85) return "hsl(0 84% 60% / 0.15)";
-  if (percent >= 70) return "hsl(38 92% 50% / 0.15)";
-  return "hsl(142 76% 36% / 0.15)";
+  if (percent >= 85) return "color-mix(in oklch, var(--color-destructive) 15%, transparent)";
+  if (percent >= 70) return "color-mix(in oklch, var(--color-warning, hsl(38 92% 50%)) 15%, transparent)";
+  return "color-mix(in oklch, var(--color-success, hsl(142 76% 36%)) 15%, transparent)";
 }
 
 interface CircleGaugeProps {

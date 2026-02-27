@@ -7,11 +7,19 @@ import { RefreshTokenModel } from "./models/refresh-token";
 import crypto from "crypto";
 
 function getAccessSecret() {
-  return new TextEncoder().encode(process.env.JWT_ACCESS_SECRET);
+  const secret = process.env.JWT_ACCESS_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error("JWT_ACCESS_SECRET must be set and at least 32 characters");
+  }
+  return new TextEncoder().encode(secret);
 }
 
 function getRefreshSecret() {
-  return new TextEncoder().encode(process.env.JWT_REFRESH_SECRET);
+  const secret = process.env.JWT_REFRESH_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error("JWT_REFRESH_SECRET must be set and at least 32 characters");
+  }
+  return new TextEncoder().encode(secret);
 }
 
 const ACCESS_TOKEN_EXPIRY = "15m";
@@ -34,13 +42,25 @@ export async function verifyPassword(passwordHash: string, password: string): Pr
   return verify(passwordHash, password);
 }
 
-// Constant-time dummy hash to prevent timing attacks on invalid usernames
-const DUMMY_HASH = "$argon2id$v=19$m=19456,t=2,p=1$dGhpc2lzYWR1bW15c2FsdA$dummyhashvalue";
+// Pre-computed Argon2 hash of a dummy password for timing-safe comparison
+// This ensures invalid-username path takes the same time as valid-username path
+let dummyHash: string | null = null;
+async function getDummyHash(): Promise<string> {
+  if (!dummyHash) {
+    dummyHash = await hash("dummy-password-for-timing-safety", {
+      memoryCost: 19456,
+      timeCost: 2,
+      parallelism: 1,
+    });
+  }
+  return dummyHash;
+}
 
 export async function verifyPasswordSafe(user: { password_hash: string } | null, password: string): Promise<boolean> {
   if (!user) {
-    // Hash dummy password to prevent timing attacks
-    try { await verify(DUMMY_HASH, password); } catch { /* expected */ }
+    // Verify against dummy hash to prevent timing attacks
+    const dummy = await getDummyHash();
+    try { await verify(dummy, password); } catch { /* expected to fail */ }
     return false;
   }
   return verifyPassword(user.password_hash, password);
@@ -98,6 +118,38 @@ export async function getSession() {
   }
 }
 
+export async function requireSession() {
+  const session = await getSession();
+  if (!session) throw new Error("Unauthorized");
+  return session;
+}
+
+// --- Terminal token (short-lived HMAC for WebSocket auth) ---
+
+export function generateTerminalToken(clusterId: string, pod: string, namespace: string): string {
+  const secret = process.env.JWT_ACCESS_SECRET;
+  if (!secret) throw new Error("JWT_ACCESS_SECRET not set");
+  const expires = Date.now() + 30_000; // 30 seconds
+  const payload = `${clusterId}:${namespace}:${pod}:${expires}`;
+  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  return `${payload}:${sig}`;
+}
+
+export function verifyTerminalToken(token: string, clusterId: string, pod: string, namespace: string): boolean {
+  const secret = process.env.JWT_ACCESS_SECRET;
+  if (!secret) return false;
+  const parts = token.split(":");
+  if (parts.length !== 4) return false;
+  const [tClusterId, tNamespace, tPod, tExpires] = parts;
+  const payload = `${tClusterId}:${tNamespace}:${tPod}:${tExpires}`;
+  const expectedSig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  const actualSig = token.slice(payload.length + 1);
+  if (!crypto.timingSafeEqual(Buffer.from(expectedSig), Buffer.from(actualSig))) return false;
+  if (Date.now() > Number(tExpires)) return false;
+  if (tClusterId !== clusterId || tPod !== pod || tNamespace !== namespace) return false;
+  return true;
+}
+
 // --- Cookie helpers ---
 
 export async function setAuthCookies(accessToken: string, refreshToken: string) {
@@ -115,7 +167,7 @@ export async function setAuthCookies(accessToken: string, refreshToken: string) 
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
-    path: "/api/auth/refresh",
+    path: "/",
     maxAge: REFRESH_TOKEN_EXPIRY_SECONDS,
   });
 }
@@ -148,18 +200,21 @@ export async function rotateRefreshToken(oldToken: string, newToken: string, use
   await connectDB();
   const oldHash = hashToken(oldToken);
 
-  const existing = await RefreshTokenModel.findOne({ token_hash: oldHash });
-  if (!existing) return null;
+  // Atomically mark old token as used (only succeeds if not already used)
+  const existing = await RefreshTokenModel.findOneAndUpdate(
+    { token_hash: oldHash, used: false },
+    { $set: { used: true } },
+    { returnDocument: "before" }
+  );
 
-  // Reuse detection: if token was already used, revoke entire family
-  if (existing.used) {
-    await RefreshTokenModel.deleteMany({ family: existing.family });
+  if (!existing) {
+    // Token was already used (replay attack) or doesn't exist — revoke entire family
+    const reused = await RefreshTokenModel.findOne({ token_hash: oldHash });
+    if (reused) {
+      await RefreshTokenModel.deleteMany({ family: reused.family });
+    }
     return null;
   }
-
-  // Mark old token as used
-  existing.used = true;
-  await existing.save();
 
   // Store new token in same family
   const newHash = hashToken(newToken);
@@ -196,6 +251,14 @@ export async function findUserByUsername(username: string) {
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+// Periodic cleanup of expired rate limit entries to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of loginAttempts) {
+    if (now > entry.resetAt) loginAttempts.delete(key);
+  }
+}, WINDOW_MS);
 
 export function checkRateLimit(key: string): boolean {
   const now = Date.now();

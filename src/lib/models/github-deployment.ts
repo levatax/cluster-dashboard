@@ -25,13 +25,15 @@ const GithubDeploymentSchema = new Schema<IGithubDeployment>(
     deploy_method: { type: String, required: true, default: "manifest" },
     release_name: { type: String, required: true },
     namespace: { type: String, required: true, default: "default" },
-    status: { type: String, required: true, default: "deploying" },
+    status: { type: String, required: true, default: "deploying", enum: ["deploying", "deployed", "failed"] },
     last_commit_sha: { type: String, default: null },
     created_at: { type: Date, default: Date.now },
     updated_at: { type: Date, default: Date.now },
   },
   { collection: "github_deployments" }
 );
+
+GithubDeploymentSchema.index({ cluster_id: 1, created_at: -1 });
 
 export const GithubDeploymentModel =
   (mongoose.models.GithubDeployment as mongoose.Model<IGithubDeployment>) ||

@@ -170,6 +170,30 @@ export interface StorageClassInfo {
   age: string;
 }
 
+export interface ConfigMapInfo {
+  name: string;
+  namespace: string;
+  keys: string[];
+  keyCount: number;
+  age: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  data: Record<string, string>;
+  binaryDataKeys: string[];
+}
+
+export interface SecretInfo {
+  name: string;
+  namespace: string;
+  type: string;
+  keys: string[];
+  keyCount: number;
+  age: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  data: Record<string, string>;
+}
+
 export interface DiscoveredApplication {
   name: string;
   namespace: string;

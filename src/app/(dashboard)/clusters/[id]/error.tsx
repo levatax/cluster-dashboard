@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, RefreshCw } from "lucide-react";
 
 export default function ClusterError({
   error,
@@ -18,7 +18,10 @@ export default function ClusterError({
         <AlertTitle>Error loading cluster</AlertTitle>
         <AlertDescription>{error.message}</AlertDescription>
       </Alert>
-      <Button onClick={reset}>Try Again</Button>
+      <Button onClick={reset}>
+        <RefreshCw className="mr-2 size-4" />
+        Try Again
+      </Button>
     </div>
   );
 }

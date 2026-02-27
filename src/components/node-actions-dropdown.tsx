@@ -35,7 +35,7 @@ export function NodeActionsDropdown({
   const [cordonLoading, setCordonLoading] = useState(false);
   const [drainOpen, setDrainOpen] = useState(false);
   const [drainLoading, setDrainLoading] = useState(false);
-  const [ignoreDaemonSets, setIgnoreDaemonSets] = useState(true);
+  const [skipDaemonSets, setSkipDaemonSets] = useState(true);
 
   async function handleCordonToggle() {
     setCordonLoading(true);
@@ -61,7 +61,7 @@ export function NodeActionsDropdown({
     setDrainLoading(true);
     try {
       const result = await drainNodeAction(clusterId, node.name, {
-        ignoreDaemonSets,
+        skipDaemonSets,
       });
       if (result.success) {
         const { evicted, errors } = result.data;
@@ -126,12 +126,12 @@ export function NodeActionsDropdown({
       >
         <div className="flex items-center space-x-2 py-2">
           <Checkbox
-            id="ignore-daemonsets"
-            checked={ignoreDaemonSets}
-            onCheckedChange={(checked) => setIgnoreDaemonSets(checked === true)}
+            id="skip-daemonsets"
+            checked={skipDaemonSets}
+            onCheckedChange={(checked) => setSkipDaemonSets(checked === true)}
           />
-          <Label htmlFor="ignore-daemonsets" className="text-sm">
-            Ignore DaemonSet pods
+          <Label htmlFor="skip-daemonsets" className="text-sm">
+            Skip DaemonSet pods
           </Label>
         </div>
       </ConfirmDialog>

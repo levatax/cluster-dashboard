@@ -7,49 +7,77 @@ import { GithubDeploymentModel } from "./models/github-deployment";
 import { DeploymentHistoryModel } from "./models/deployment-history";
 import { DeploymentTemplateModel } from "./models/deployment-template";
 import { DockerhubDeploymentModel } from "./models/dockerhub-deployment";
+import { encrypt, decrypt, encryptionAvailable } from "./encryption";
+
+// --- Encryption helpers ---
+
+function encryptField(value: string): string {
+  if (!encryptionAvailable()) return value;
+  return encrypt(value);
+}
+
+function decryptField(value: string): string {
+  if (!encryptionAvailable()) return value;
+  try {
+    return decrypt(value);
+  } catch {
+    // Value may be stored unencrypted (pre-migration)
+    return value;
+  }
+}
 
 // --- Helpers ---
 
-export function isValidObjectId(id: string): boolean {
+function isValidObjectId(id: string): boolean {
   return mongoose.Types.ObjectId.isValid(id);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toDateString(d: any): string {
-  if (!d) return new Date().toISOString();
+  if (!d) return "";
   if (d instanceof Date) return d.toISOString();
   return String(d);
 }
 
 // --- Cluster ---
 
-export interface Cluster {
+export interface ClusterMeta {
   id: string;
   name: string;
   server: string;
-  kubeconfig_yaml: string;
   created_at: string;
   last_connected_at: string | null;
   registry_url: string | null;
 }
 
+export interface Cluster extends ClusterMeta {
+  kubeconfig_yaml: string;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toCluster(doc: any): Cluster {
+function toClusterMeta(doc: any): ClusterMeta {
   return {
     id: doc._id.toString(),
     name: doc.name,
     server: doc.server,
-    kubeconfig_yaml: doc.kubeconfig_yaml,
     created_at: toDateString(doc.created_at),
     last_connected_at: doc.last_connected_at ? toDateString(doc.last_connected_at) : null,
     registry_url: doc.registry_url ?? null,
   };
 }
 
-export async function getAllClusters(): Promise<Cluster[]> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toCluster(doc: any): Cluster {
+  return {
+    ...toClusterMeta(doc),
+    kubeconfig_yaml: decryptField(doc.kubeconfig_yaml),
+  };
+}
+
+export async function getAllClusters(): Promise<ClusterMeta[]> {
   await connectDB();
-  const docs = await ClusterModel.find().sort({ created_at: -1 }).lean();
-  return docs.map(toCluster);
+  const docs = await ClusterModel.find().select("-kubeconfig_yaml").sort({ created_at: -1 }).lean();
+  return docs.map(toClusterMeta);
 }
 
 export async function getClusterById(id: string): Promise<Cluster | null> {
@@ -61,16 +89,18 @@ export async function getClusterById(id: string): Promise<Cluster | null> {
 
 export async function insertCluster(name: string, server: string, yaml: string): Promise<Cluster> {
   await connectDB();
-  const doc = await ClusterModel.create({ name, server, kubeconfig_yaml: yaml });
+  const doc = await ClusterModel.create({ name, server, kubeconfig_yaml: encryptField(yaml) });
   return toCluster(doc);
 }
 
 export async function deleteCluster(id: string): Promise<void> {
+  if (!isValidObjectId(id)) return;
   await connectDB();
   await ClusterModel.findOneAndDelete({ _id: id });
 }
 
 export async function updateLastConnected(id: string): Promise<void> {
+  if (!isValidObjectId(id)) return;
   await connectDB();
   await ClusterModel.findByIdAndUpdate(id, { last_connected_at: new Date() });
 }
@@ -182,19 +212,14 @@ export async function getAppInstalls(clusterId: string): Promise<AppInstallRow[]
   return docs.map(toAppInstall);
 }
 
-export async function getAppInstallById(id: string): Promise<AppInstallRow | null> {
-  await connectDB();
-  if (!isValidObjectId(id)) return null;
-  const doc = await AppInstallModel.findById(id).lean();
-  return doc ? toAppInstall(doc) : null;
-}
-
 export async function updateAppInstallStatus(id: string, status: string): Promise<void> {
+  if (!isValidObjectId(id)) return;
   await connectDB();
   await AppInstallModel.findByIdAndUpdate(id, { status, updated_at: new Date() });
 }
 
 export async function deleteAppInstall(id: string): Promise<void> {
+  if (!isValidObjectId(id)) return;
   await connectDB();
   await AppInstallModel.findByIdAndDelete(id);
 }
@@ -224,7 +249,7 @@ function toGithubDeployment(doc: any): GithubDeploymentRow {
     cluster_id: doc.cluster_id.toString(),
     repo_url: doc.repo_url,
     branch: doc.branch,
-    github_token: doc.github_token ?? null,
+    github_token: doc.github_token ? decryptField(doc.github_token) : null,
     deploy_config: doc.deploy_config ?? {},
     deploy_method: doc.deploy_method,
     release_name: doc.release_name,
@@ -251,7 +276,7 @@ export async function insertGithubDeployment(
     cluster_id: clusterId,
     repo_url: repoUrl,
     branch,
-    github_token: githubToken,
+    github_token: githubToken ? encryptField(githubToken) : null,
     deploy_config: deployConfig,
     deploy_method: deployMethod,
     release_name: releaseName,
@@ -266,14 +291,8 @@ export async function getGithubDeployments(clusterId: string): Promise<GithubDep
   return docs.map(toGithubDeployment);
 }
 
-export async function getGithubDeploymentById(id: string): Promise<GithubDeploymentRow | null> {
-  await connectDB();
-  if (!isValidObjectId(id)) return null;
-  const doc = await GithubDeploymentModel.findById(id).lean();
-  return doc ? toGithubDeployment(doc) : null;
-}
-
 export async function updateGithubDeploymentStatus(id: string, status: string, commitSha?: string): Promise<void> {
+  if (!isValidObjectId(id)) return;
   await connectDB();
   const update: Record<string, unknown> = { status, updated_at: new Date() };
   if (commitSha) update.last_commit_sha = commitSha;
@@ -281,6 +300,7 @@ export async function updateGithubDeploymentStatus(id: string, status: string, c
 }
 
 export async function deleteGithubDeployment(id: string): Promise<void> {
+  if (!isValidObjectId(id)) return;
   await connectDB();
   await GithubDeploymentModel.findByIdAndDelete(id);
 }
@@ -404,40 +424,16 @@ export async function insertDeploymentTemplate(
   return toDeploymentTemplate(doc);
 }
 
-export async function getAllDeploymentTemplates(): Promise<DeploymentTemplateRow[]> {
-  await connectDB();
-  const docs = await DeploymentTemplateModel.find().sort({ updated_at: -1 }).lean();
-  return docs.map(toDeploymentTemplate);
-}
-
 export async function getDeploymentTemplatesByType(sourceType: string): Promise<DeploymentTemplateRow[]> {
   await connectDB();
   const docs = await DeploymentTemplateModel.find({ source_type: sourceType }).sort({ updated_at: -1 }).lean();
   return docs.map(toDeploymentTemplate);
 }
 
-export async function getDeploymentTemplateById(id: string): Promise<DeploymentTemplateRow | null> {
-  await connectDB();
-  if (!isValidObjectId(id)) return null;
-  const doc = await DeploymentTemplateModel.findById(id).lean();
-  return doc ? toDeploymentTemplate(doc) : null;
-}
-
 export async function deleteDeploymentTemplate(id: string): Promise<void> {
+  if (!isValidObjectId(id)) return;
   await connectDB();
   await DeploymentTemplateModel.findByIdAndDelete(id);
-}
-
-export async function updateDeploymentTemplate(
-  id: string,
-  updates: { name?: string; description?: string | null; config?: Record<string, unknown> }
-): Promise<void> {
-  await connectDB();
-  const set: Record<string, unknown> = { updated_at: new Date() };
-  if (updates.name !== undefined) set.name = updates.name;
-  if (updates.description !== undefined) set.description = updates.description;
-  if (updates.config !== undefined) set.config = updates.config;
-  await DeploymentTemplateModel.findByIdAndUpdate(id, set);
 }
 
 // --- Docker Hub Deployments ---
@@ -497,19 +493,14 @@ export async function getDockerhubDeployments(clusterId: string): Promise<Docker
   return docs.map(toDockerhubDeployment);
 }
 
-export async function getDockerhubDeploymentById(id: string): Promise<DockerhubDeploymentRow | null> {
-  await connectDB();
-  if (!isValidObjectId(id)) return null;
-  const doc = await DockerhubDeploymentModel.findById(id).lean();
-  return doc ? toDockerhubDeployment(doc) : null;
-}
-
 export async function updateDockerhubDeploymentStatus(id: string, status: string): Promise<void> {
+  if (!isValidObjectId(id)) return;
   await connectDB();
   await DockerhubDeploymentModel.findByIdAndUpdate(id, { status, updated_at: new Date() });
 }
 
 export async function deleteDockerhubDeployment(id: string): Promise<void> {
+  if (!isValidObjectId(id)) return;
   await connectDB();
   await DockerhubDeploymentModel.findByIdAndDelete(id);
 }

@@ -46,7 +46,7 @@ function computeStatus(
   if (allHealthy) return "Healthy";
 
   const anyProgressing = deployments.some((d) =>
-    d.conditions.some((c) => c.type === "Progressing" && c.status === "True" && c.reason === "NewReplicaSetAvailable" === false)
+    d.conditions.some((c) => c.type === "Progressing" && c.status === "True" && c.reason !== "NewReplicaSetAvailable")
   );
   if (anyProgressing) return "Progressing";
 
@@ -250,12 +250,9 @@ export function discoverApplications(
   const apps: DiscoveredApplication[] = [];
   for (const [, group] of appMap) {
     const allImages = new Set<string>();
-    for (const dep of group.deployments) {
-      // Extract images from pods matching this deployment
-      for (const pod of group.pods) {
-        for (const container of pod.containers) {
-          if (container.image) allImages.add(container.image);
-        }
+    for (const pod of group.pods) {
+      for (const container of pod.containers) {
+        if (container.image) allImages.add(container.image);
       }
     }
 

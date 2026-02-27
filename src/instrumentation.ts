@@ -20,5 +20,16 @@ export async function register() {
     // Start the terminal WebSocket server for pod exec
     const { startTerminalServer } = await import("@/lib/terminal-server");
     startTerminalServer();
+
+    // Initialize the Kubernetes watch manager singleton
+    const { getWatchManager } = await import("@/lib/kubernetes-watch");
+    const watchManager = getWatchManager();
+
+    // Graceful shutdown
+    const shutdownHandler = () => {
+      watchManager.shutdown();
+    };
+    process.on("SIGTERM", shutdownHandler);
+    process.on("SIGINT", shutdownHandler);
   }
 }

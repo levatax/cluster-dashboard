@@ -124,7 +124,7 @@ export async function getLatestCommitSha(
     throw new Error(`GitHub API error: ${resp.status} ${resp.statusText}`);
   }
   const data = await resp.json();
-  return (data.sha as string).slice(0, 7);
+  return (data.sha as string).slice(0, 12);
 }
 
 export type DetectedDeployType =

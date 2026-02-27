@@ -1,5 +1,6 @@
 import { getAllClusters } from "@/lib/db";
 import { ImportDialog } from "@/components/import-dialog";
+import { CreateClusterWizard } from "@/components/create-cluster-wizard/create-cluster-wizard";
 import { ClusterSearch } from "@/components/cluster-search";
 import { PageTransition, FadeIn } from "@/components/motion-primitives";
 
@@ -28,7 +29,10 @@ export default async function Home() {
                 </span>
               )}
             </div>
-            <ImportDialog />
+            <div className="flex items-center gap-2">
+              <CreateClusterWizard />
+              <ImportDialog />
+            </div>
           </div>
         </FadeIn>
 

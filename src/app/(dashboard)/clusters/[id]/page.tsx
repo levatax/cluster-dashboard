@@ -1,11 +1,22 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getClusterById } from "@/lib/db";
 import { fetchClusterInfo, fetchNodes, fetchNamespaces, fetchClusterHealth } from "@/app/actions/kubernetes";
-import { DeleteClusterButton } from "@/components/delete-cluster-button";
 import { ClusterDetailClient } from "@/components/cluster-detail-client";
-import { PageTransition, FadeIn } from "@/components/motion-primitives";
+import { PageTransition } from "@/components/motion-primitives";
 import { SetBreadcrumbName } from "@/components/set-breadcrumb-name";
-import { Server } from "lucide-react";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const cluster = await getClusterById(id);
+  return {
+    title: cluster ? `${cluster.name} — K8s Dashboard` : "Cluster Not Found",
+  };
+}
 
 export default async function ClusterDetailPage({
   params,
@@ -61,24 +72,6 @@ export default async function ClusterDetailPage({
     <PageTransition>
       <SetBreadcrumbName name={cluster.name} />
       <div className="space-y-4">
-        <FadeIn>
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 space-y-1">
-              <div className="flex items-center gap-3">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gradient-from)]/20 to-[var(--gradient-to)]/20 ring-1 ring-primary/20">
-                  <Server className="size-4 text-primary" />
-                </div>
-                <h1 className="truncate text-2xl font-bold tracking-tight">{cluster.name}</h1>
-              </div>
-              <p className="text-muted-foreground font-mono text-sm truncate pl-11">{cluster.server}</p>
-            </div>
-            <DeleteClusterButton
-              clusterId={cluster.id}
-              clusterName={cluster.name}
-            />
-          </div>
-        </FadeIn>
-
         <ClusterDetailClient
           clusterId={id}
           cluster={clientCluster}

@@ -3,17 +3,71 @@
 import { useState, useEffect, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AppCard } from "./app-card";
 import { AppDetailDialog } from "./app-detail-dialog";
 import { CategoryFilter } from "./category-filter";
 import { InstalledAppsList } from "./installed-apps-list";
-import { StaggerGrid, StaggerItem } from "@/components/motion-primitives";
-import { fetchCatalogApps, fetchInstalledApps, installCatalogApp, uninstallCatalogApp, checkHelmAvailable } from "@/app/actions/app-store";
-import { Search } from "lucide-react";
+import {
+  fetchCatalogApps,
+  fetchInstalledApps,
+  installCatalogApp,
+  uninstallCatalogApp,
+  checkHelmAvailable,
+} from "@/app/actions/app-store";
+import {
+  Search,
+  Database,
+  Zap,
+  Globe,
+  Activity,
+  MessageSquare,
+  HardDrive,
+  GitBranch,
+  Shield,
+  Network,
+  FlaskConical,
+} from "lucide-react";
 import { toast } from "sonner";
-import type { CatalogCategory } from "@/lib/catalog/types";
-type CatalogAppView = { id: string; name: string; description: string; icon: string; category: CatalogCategory; version: string; versions: string[]; website?: string; configFields: import("@/lib/catalog/types").ConfigField[]; helmChart?: { repo: string; repoUrl: string; chart: string } };
+import { CATEGORY_LABELS, type CatalogCategory } from "@/lib/catalog/types";
 import type { AppInstallRow } from "@/lib/db";
+
+type CatalogAppView = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  category: CatalogCategory;
+  version: string;
+  versions: string[];
+  website?: string;
+  configFields: import("@/lib/catalog/types").ConfigField[];
+  helmChart?: { repo: string; repoUrl: string; chart: string };
+};
+
+const CATEGORY_ICONS: Record<CatalogCategory, React.ElementType> = {
+  databases: Database,
+  caching: Zap,
+  "web-servers": Globe,
+  monitoring: Activity,
+  "message-queues": MessageSquare,
+  storage: HardDrive,
+  "ci-cd": GitBranch,
+  security: Shield,
+  networking: Network,
+};
+
+const CATEGORY_ORDER: CatalogCategory[] = [
+  "databases",
+  "caching",
+  "web-servers",
+  "monitoring",
+  "message-queues",
+  "storage",
+  "ci-cd",
+  "security",
+  "networking",
+];
 
 interface AppStorePageProps {
   clusterId: string;
@@ -28,17 +82,21 @@ export function AppStorePage({ clusterId }: AppStorePageProps) {
   const [selectedApp, setSelectedApp] = useState<CatalogAppView | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [helmAvailable, setHelmAvailable] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetchCatalogApps().then((r) => {
-      if (r.success) setApps(r.data);
-    });
-    fetchInstalledApps(clusterId).then((r) => {
-      if (r.success) setInstalls(r.data);
-    });
-    checkHelmAvailable().then((r) => {
-      if (r.success) setHelmAvailable(r.data);
-    });
+    setIsLoading(true);
+    Promise.all([
+      fetchCatalogApps().then((r) => {
+        if (r.success) setApps(r.data);
+      }),
+      fetchInstalledApps(clusterId).then((r) => {
+        if (r.success) setInstalls(r.data);
+      }),
+      checkHelmAvailable().then((r) => {
+        if (r.success) setHelmAvailable(r.data);
+      }),
+    ]).finally(() => setIsLoading(false));
   }, [clusterId]);
 
   const categories = useMemo(() => {
@@ -46,7 +104,9 @@ export function AppStorePage({ clusterId }: AppStorePageProps) {
   }, [apps]);
 
   const installedAppIds = useMemo(() => {
-    return new Set(installs.filter((i) => i.status !== "uninstalled").map((i) => i.catalog_app_id));
+    return new Set(
+      installs.filter((i) => i.status !== "uninstalled").map((i) => i.catalog_app_id)
+    );
   }, [installs]);
 
   const catalogNames = useMemo(() => {
@@ -65,11 +125,29 @@ export function AppStorePage({ clusterId }: AppStorePageProps) {
     return result;
   }, [apps, category, search]);
 
-  async function handleInstall(appId: string, config: Record<string, unknown>, deployMethod: "manifest" | "helm") {
+  const grouped = useMemo(() => {
+    const groups: Partial<Record<CatalogCategory, CatalogAppView[]>> = {};
+    for (const app of filtered) {
+      if (!groups[app.category]) groups[app.category] = [];
+      groups[app.category]!.push(app);
+    }
+    return groups;
+  }, [filtered]);
+
+  const groupEntries = useMemo(() => {
+    return CATEGORY_ORDER.filter((cat) => (grouped[cat]?.length ?? 0) > 0).map(
+      (cat) => [cat, grouped[cat]!] as const
+    );
+  }, [grouped]);
+
+  async function handleInstall(
+    appId: string,
+    config: Record<string, unknown>,
+    deployMethod: "manifest" | "helm"
+  ) {
     const result = await installCatalogApp(clusterId, appId, config, deployMethod);
     if (result.success) {
       toast.success("App deployed successfully");
-      // Refresh installs
       const r = await fetchInstalledApps(clusterId);
       if (r.success) setInstalls(r.data);
     } else {
@@ -92,6 +170,17 @@ export function AppStorePage({ clusterId }: AppStorePageProps) {
 
   return (
     <div className="space-y-4">
+      {/* Beta warning */}
+      <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
+        <FlaskConical className="mt-0.5 size-4 shrink-0" />
+        <div>
+          <span className="font-medium">Beta feature</span> — The App Store is under active
+          development. Some apps may not install correctly, behave unexpectedly, or lack full
+          configuration support. We&apos;re continuously improving the catalog and deployment
+          reliability.
+        </div>
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
@@ -136,32 +225,57 @@ export function AppStorePage({ clusterId }: AppStorePageProps) {
             onSelect={setCategory}
           />
 
-          {/* App grid */}
-          {filtered.length > 0 ? (
-            <StaggerGrid key={filtered.length} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {filtered.map((app) => (
-                <StaggerItem key={app.id}>
-                  <AppCard
-                    id={app.id}
-                    name={app.name}
-                    description={app.description}
-                    icon={app.icon}
-                    category={app.category}
-                    version={app.version}
-                    installed={installedAppIds.has(app.id)}
-                    onInstall={() => {
-                      setSelectedApp(app);
-                      setDialogOpen(true);
-                    }}
-                  />
-                </StaggerItem>
+          {/* App groups */}
+          {isLoading ? (
+            <div className="space-y-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="space-y-1.5">
+                  <Skeleton className="h-5 w-32" />
+                  <div className="rounded-lg border divide-y overflow-hidden">
+                    {Array.from({ length: 3 }).map((_, j) => (
+                      <Skeleton key={j} className="h-12 rounded-none" />
+                    ))}
+                  </div>
+                </div>
               ))}
-            </StaggerGrid>
-          ) : apps.length > 0 ? (
+            </div>
+          ) : groupEntries.length > 0 ? (
+            <div className="space-y-4">
+              {groupEntries.map(([cat, catApps]) => {
+                const Icon = CATEGORY_ICONS[cat];
+                return (
+                  <div key={cat}>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <Icon className="size-3.5 text-muted-foreground" />
+                      <h3 className="text-sm font-medium">{CATEGORY_LABELS[cat]}</h3>
+                      <span className="text-xs text-muted-foreground">({catApps.length})</span>
+                    </div>
+                    <div className="rounded-lg border divide-y overflow-hidden">
+                      {catApps.map((app) => (
+                        <AppCard
+                          key={app.id}
+                          id={app.id}
+                          name={app.name}
+                          description={app.description}
+                          icon={app.icon}
+                          version={app.version}
+                          installed={installedAppIds.has(app.id)}
+                          onInstall={() => {
+                            setSelectedApp(app);
+                            setDialogOpen(true);
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
             <p className="text-center text-muted-foreground text-sm py-8">
               No apps found matching your search.
             </p>
-          ) : null}
+          )}
         </>
       ) : (
         <InstalledAppsList

@@ -35,6 +35,7 @@ export function NamespaceSelector({
       onOpenChange={(open) => {
         if (!open) setSearch("");
       }}
+      modal={false}
     >
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="min-w-[180px] justify-between">
@@ -51,6 +52,7 @@ export function NamespaceSelector({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8 border-0 p-0 shadow-none focus-visible:ring-0"
+              autoFocus
             />
           </div>
         </div>

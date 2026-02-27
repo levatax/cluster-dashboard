@@ -1,11 +1,17 @@
 import { NextRequest } from "next/server";
 import { getClusterById } from "@/lib/db";
 import { createLogStream } from "@/lib/kubernetes";
+import { getSession } from "@/lib/auth";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getSession();
+  if (!session) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   const { id } = await params;
   const cluster = await getClusterById(id);
 

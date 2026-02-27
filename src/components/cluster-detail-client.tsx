@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { RefreshCw, Pause, Play, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { AlertCircle } from "lucide-react";
@@ -11,7 +11,6 @@ import { PodTable } from "@/components/pod-table";
 import { DeploymentTable } from "@/components/deployment-table";
 import { ServiceTable } from "@/components/service-table";
 import { IngressTable } from "@/components/ingress-table";
-import { NamespaceSelector } from "@/components/namespace-selector";
 import { ResourceDetailSheet } from "@/components/resource-detail-sheet";
 import { MonitoringTab } from "@/components/monitoring-tab";
 import { PodLogViewer } from "@/components/pod-log-viewer";
@@ -27,11 +26,13 @@ import { DockerhubDeployPage } from "@/components/dockerhub-deploy/dockerhub-dep
 import { TemplatePage } from "@/components/resource-templates/template-page";
 import { DeployHistoryTable } from "@/components/deploy-shared/deploy-history-table";
 import { StorageSection } from "@/components/storage-section";
+import { ConfigurationSection } from "@/components/configuration-section";
 import { HelmReleasesSection } from "@/components/helm-releases-section";
 import { ApplicationsSection } from "@/components/applications-section";
 import { FadeIn } from "@/components/motion-primitives";
 import { useHotkeys } from "@/hooks/use-hotkeys";
 import { useAlertEvaluation } from "@/hooks/use-alert-evaluation";
+import { useClusterWatch, type WatchableResource } from "@/hooks/use-cluster-watch";
 import {
   fetchClusterInfo,
   fetchNodes,
@@ -45,6 +46,8 @@ import {
   fetchPersistentVolumes,
   fetchPersistentVolumeClaims,
   fetchStorageClasses,
+  fetchConfigMaps,
+  fetchSecrets,
   fetchApplications,
   fetchHelmReleases,
 } from "@/app/actions/kubernetes";
@@ -62,6 +65,8 @@ import type {
   PersistentVolumeInfo,
   PersistentVolumeClaimInfo,
   StorageClassInfo,
+  ConfigMapInfo,
+  SecretInfo,
   DiscoveredApplication,
 } from "@/lib/types";
 import type { AlertConfig } from "@/lib/db";
@@ -84,10 +89,41 @@ interface ClusterDetailClientProps {
   initialHealth?: ClusterHealthSummary;
 }
 
-const REFRESH_INTERVAL = 30_000;
+const FALLBACK_POLL_INTERVAL = 60_000;
+
+/**
+ * Merge a watch event into an existing state array.
+ * ADDED/MODIFIED: upsert by key. DELETED: remove by key. SNAPSHOT: replace all.
+ */
+function applyResourceUpdate<T extends { name: string; namespace?: string }>(
+  items: T[],
+  action: string,
+  data: T | T[]
+): T[] {
+  if (action === "SNAPSHOT") {
+    return Array.isArray(data) ? data : items;
+  }
+
+  const item = data as T;
+  const key = (i: T) => ("namespace" in i && i.namespace ? `${i.namespace}/${i.name}` : i.name);
+  const itemKey = key(item);
+
+  if (action === "DELETED") {
+    return items.filter((i) => key(i) !== itemKey);
+  }
+
+  // ADDED or MODIFIED — upsert
+  const idx = items.findIndex((i) => key(i) === itemKey);
+  if (idx >= 0) {
+    const next = [...items];
+    next[idx] = item;
+    return next;
+  }
+  return [...items, item];
+}
 
 // Sections that need namespace filtering
-const RESOURCE_SECTIONS: InnerSidebarSection[] = ["applications", "pods", "deployments", "services", "storage", "helm-releases", "monitoring", "logs"];
+const RESOURCE_SECTIONS: InnerSidebarSection[] = ["applications", "pods", "deployments", "services", "configuration", "storage", "helm-releases", "monitoring"];
 
 export function ClusterDetailClient({
   clusterId,
@@ -117,7 +153,6 @@ export function ClusterDetailClient({
   const [deployments, setDeployments] = useState<DeploymentInfo[]>([]);
   const [services, setServices] = useState<ServiceInfo[]>([]);
   const [ingresses, setIngresses] = useState<IngressInfo[]>([]);
-  const [servicesSubTab, setServicesSubTab] = useState<"services" | "ingresses">("services");
 
   // Applications state
   const [applications, setApplications] = useState<DiscoveredApplication[]>([]);
@@ -127,6 +162,10 @@ export function ClusterDetailClient({
   const [pvcs, setPvcs] = useState<PersistentVolumeClaimInfo[]>([]);
   const [storageClasses, setStorageClasses] = useState<StorageClassInfo[]>([]);
 
+  // Configuration state
+  const [configMaps, setConfigMaps] = useState<ConfigMapInfo[]>([]);
+  const [secrets, setSecrets] = useState<SecretInfo[]>([]);
+
   // Helm releases state
   const [helmReleases, setHelmReleases] = useState<HelmRelease[]>([]);
 
@@ -135,6 +174,7 @@ export function ClusterDetailClient({
   const [nodeMetrics, setNodeMetrics] = useState<NodeMetricsInfo[]>([]);
   const [events, setEvents] = useState<ClusterEventInfo[]>([]);
   const [alertConfigs, setAlertConfigs] = useState<AlertConfig[]>([]);
+  const [monitoringFilter, setMonitoringFilter] = useState<"all" | "Normal" | "Warning">("all");
 
   // Log viewer state
   const [logViewerOpen, setLogViewerOpen] = useState(false);
@@ -167,15 +207,15 @@ export function ClusterDetailClient({
 
   // Detail sheet state
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [sheetType, setSheetType] = useState<"pod" | "deployment" | "service" | "ingress" | null>(null);
-  const [sheetResource, setSheetResource] = useState<PodInfo | DeploymentInfo | ServiceInfo | IngressInfo | null>(null);
+  const [sheetType, setSheetType] = useState<"pod" | "deployment" | "service" | "ingress" | "configmap" | "secret" | null>(null);
+  const [sheetResource, setSheetResource] = useState<PodInfo | DeploymentInfo | ServiceInfo | IngressInfo | ConfigMapInfo | SecretInfo | null>(null);
 
   // Evaluate alerts
   const activeAlerts = useAlertEvaluation(nodeMetrics, alertConfigs);
 
   // Section keyboard shortcuts (1-9 keys)
   const sectionKeys: InnerSidebarSection[] = useMemo(
-    () => ["overview", "nodes", "monitoring", "pods", "deployments", "services", "storage", "logs", "app-store"],
+    () => ["overview", "nodes", "monitoring", "pods", "deployments", "services", "storage", "app-store"],
     []
   );
 
@@ -215,12 +255,13 @@ export function ClusterDetailClient({
       pods: pods.length > 0 ? pods.length : undefined,
       deployments: deployments.length > 0 ? deployments.length : undefined,
       services: services.length + ingresses.length > 0 ? services.length + ingresses.length : undefined,
+      configuration: configMaps.length + secrets.length > 0 ? configMaps.length + secrets.length : undefined,
       storage: pvcs.length > 0 ? pvcs.length : undefined,
       helmReleases: helmReleases.length > 0 ? helmReleases.length : undefined,
       alerts: activeAlerts.length > 0 ? activeAlerts.length : undefined,
       alertLevel: activeAlerts.some((a) => a.level === "critical") ? "critical" : activeAlerts.length > 0 ? "warning" : undefined,
     });
-  }, [info.connected, nodes.length, applications.length, pods.length, deployments.length, services.length, ingresses.length, pvcs.length, helmReleases.length, activeAlerts, setCounts]);
+  }, [info.connected, nodes.length, applications.length, pods.length, deployments.length, services.length, ingresses.length, configMaps.length, secrets.length, pvcs.length, helmReleases.length, activeAlerts, setCounts]);
 
   // Reset section to overview when cluster changes
   useEffect(() => {
@@ -248,7 +289,7 @@ export function ClusterDetailClient({
       if (tab === "applications") {
         const result = await fetchApplications(clusterId, ns);
         if (result.success) setApplications(result.data);
-      } else if (tab === "pods" || tab === "logs") {
+      } else if (tab === "pods") {
         const result = await fetchPods(clusterId, ns);
         if (result.success) setPods(result.data);
       } else if (tab === "deployments") {
@@ -261,6 +302,13 @@ export function ClusterDetailClient({
         ]);
         if (svcResult.success) setServices(svcResult.data);
         if (ingResult.success) setIngresses(ingResult.data);
+      } else if (tab === "configuration") {
+        const [cmResult, secretResult] = await Promise.all([
+          fetchConfigMaps(clusterId, ns),
+          fetchSecrets(clusterId, ns),
+        ]);
+        if (cmResult.success) setConfigMaps(cmResult.data);
+        if (secretResult.success) setSecrets(secretResult.data);
       } else if (tab === "storage") {
         const [pvResult, pvcResult, scResult] = await Promise.all([
           fetchPersistentVolumes(clusterId),
@@ -314,8 +362,54 @@ export function ClusterDetailClient({
     }
   }, [clusterId, activeSection, namespace, fetchResourceTab]);
 
+  // --- Real-time watch ---
+  // Determine which resources to watch based on active section
+  const watchResources = useMemo<WatchableResource[]>(() => {
+    // pods and deployments are always watched — health cards on overview need their counts
+    return ["nodes", "events", "pods", "deployments"];
+  }, []);
+
+  const watchState = useClusterWatch(
+    clusterId,
+    watchResources,
+    {
+      onNode: (action, data) => {
+        setNodes((prev) => applyResourceUpdate(prev, action, data));
+        setLastUpdated(new Date());
+      },
+      onPod: (action, data) => {
+        setPods((prev) => applyResourceUpdate(prev, action, data));
+        setLastUpdated(new Date());
+      },
+      onDeployment: (action, data) => {
+        setDeployments((prev) => applyResourceUpdate(prev, action, data));
+        setLastUpdated(new Date());
+      },
+      onEvent: (action, data) => {
+        setEvents((prev) => {
+          const updated = applyResourceUpdate(prev, action, data);
+          // Keep events sorted by timestamp and capped at 200
+          return updated
+            .sort((a, b) => {
+              const ta = a.lastTimestamp || a.firstTimestamp || "";
+              const tb = b.lastTimestamp || b.firstTimestamp || "";
+              return tb.localeCompare(ta);
+            })
+            .slice(0, 200);
+        });
+        setLastUpdated(new Date());
+      },
+      onHealth: (data) => {
+        setHealth(data);
+        setLastUpdated(new Date());
+      },
+    },
+    { namespace, enabled: !isPaused && info.connected }
+  );
+
+  // Fallback polling — only when watch is disconnected
   useEffect(() => {
-    if (isPaused) {
+    if (isPaused || watchState.connected) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -323,14 +417,14 @@ export function ClusterDetailClient({
       return;
     }
 
-    intervalRef.current = setInterval(refresh, REFRESH_INTERVAL);
+    intervalRef.current = setInterval(refresh, FALLBACK_POLL_INTERVAL);
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
-  }, [isPaused, refresh]);
+  }, [isPaused, watchState.connected, refresh]);
 
   // Lazy load resource data when section changes (triggered by sidebar context)
   const prevSectionRef = useRef(activeSection);
@@ -346,6 +440,15 @@ export function ClusterDetailClient({
 
   const handleSectionChange = useCallback(
     (section: InnerSidebarSection) => {
+      if (section === "monitoring") setMonitoringFilter("all");
+      setActiveSection(section);
+    },
+    [setActiveSection]
+  );
+
+  const handleOverviewNavigate = useCallback(
+    (section: InnerSidebarSection, filter?: "Warning") => {
+      if (section === "monitoring") setMonitoringFilter(filter ?? "all");
       setActiveSection(section);
     },
     [setActiveSection]
@@ -365,8 +468,8 @@ export function ClusterDetailClient({
   );
 
   function openDetail(
-    type: "pod" | "deployment" | "service" | "ingress",
-    resource: PodInfo | DeploymentInfo | ServiceInfo | IngressInfo
+    type: "pod" | "deployment" | "service" | "ingress" | "configmap" | "secret",
+    resource: PodInfo | DeploymentInfo | ServiceInfo | IngressInfo | ConfigMapInfo | SecretInfo
   ) {
     setSheetType(type);
     setSheetResource(resource);
@@ -403,21 +506,22 @@ export function ClusterDetailClient({
   }
 
   const hasError = !!error;
-  const isResourceSection = RESOURCE_SECTIONS.includes(activeSection);
 
   // Render the active section content
   function renderContent() {
     switch (activeSection) {
       case "overview":
-        return <ClusterOverview info={info} cluster={cluster} health={health} />;
+        return <ClusterOverview info={info} cluster={cluster} health={health} onNavigate={handleOverviewNavigate} />;
 
       case "nodes":
         return info.connected ? (
           <NodeTable
             nodes={nodes}
             metrics={nodeMetrics}
+            pods={pods}
             clusterId={clusterId}
             onRefresh={handleMutationRefresh}
+            onSelectPod={(p) => openDetail("pod", p)}
           />
         ) : (
           <p className="text-muted-foreground py-8 text-center">
@@ -431,6 +535,7 @@ export function ClusterDetailClient({
             events={events}
             alerts={activeAlerts}
             onConfigureAlerts={() => setAlertDialogOpen(true)}
+            initialTypeFilter={monitoringFilter}
           />
         ) : (
           <p className="text-muted-foreground py-8 text-center">
@@ -453,7 +558,12 @@ export function ClusterDetailClient({
 
       case "pods":
         return info.connected ? (
-          <PodTable pods={pods} onSelect={(p) => openDetail("pod", p)} />
+          <PodTable
+            pods={pods}
+            onSelect={(p) => openDetail("pod", p)}
+            onViewLogs={handleViewLogs}
+            onOpenTerminal={handleOpenTerminal}
+          />
         ) : (
           <p className="text-muted-foreground py-8 text-center">
             Cannot fetch pods — cluster is disconnected.
@@ -466,6 +576,7 @@ export function ClusterDetailClient({
             deployments={deployments}
             onSelect={(d) => openDetail("deployment", d)}
             clusterId={clusterId}
+            onRefresh={handleMutationRefresh}
           />
         ) : (
           <p className="text-muted-foreground py-8 text-center">
@@ -475,50 +586,67 @@ export function ClusterDetailClient({
 
       case "services":
         return info.connected ? (
-          <div className="space-y-4">
-            <div className="flex items-center gap-1">
-              <Button
-                variant={servicesSubTab === "services" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setServicesSubTab("services")}
-              >
-                Services ({services.length})
-              </Button>
-              <Button
-                variant={servicesSubTab === "ingresses" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setServicesSubTab("ingresses")}
-              >
-                Ingresses ({ingresses.length})
-              </Button>
-              {servicesSubTab === "ingresses" && (
+          <div className="space-y-8">
+            {/* Header */}
+            <div>
+              <h2 className="text-base font-semibold">Services & Ingress</h2>
+              <p className="text-sm text-muted-foreground">Internal and external network endpoints for this cluster</p>
+            </div>
+
+            {/* Ingresses section */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold">Ingresses</h3>
+                  <p className="text-muted-foreground text-xs mt-0.5">HTTP/S routing rules for external access</p>
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="ml-auto border-primary/30 text-primary hover:bg-primary/5"
+                  className="border-primary/30 text-primary hover:bg-primary/5"
                   onClick={() => setCreateIngressOpen(true)}
                 >
                   <Plus className="mr-1 size-3.5" />
                   Add Ingress
                 </Button>
-              )}
-            </div>
-
-            {servicesSubTab === "services" ? (
-              <ServiceTable
-                services={services}
-                onSelect={(s) => openDetail("service", s)}
-              />
-            ) : (
+              </div>
               <IngressTable
                 ingresses={ingresses}
                 onSelect={(i) => openDetail("ingress", i)}
               />
-            )}
+            </div>
+
+            <div className="border-t" />
+
+            {/* Services section */}
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold">Services</h3>
+                <p className="text-muted-foreground text-xs mt-0.5">Internal and external network endpoints</p>
+              </div>
+              <ServiceTable
+                services={services}
+                onSelect={(s) => openDetail("service", s)}
+              />
+            </div>
           </div>
         ) : (
           <p className="text-muted-foreground py-8 text-center">
             Cannot fetch services — cluster is disconnected.
+          </p>
+        );
+
+      case "configuration":
+        return info.connected ? (
+          <ConfigurationSection
+            configMaps={configMaps}
+            secrets={secrets}
+            onSelectConfigMap={(cm) => openDetail("configmap", cm)}
+            onSelectSecret={(s) => openDetail("secret", s)}
+          />
+        ) : (
+          <p className="text-muted-foreground py-8 text-center">
+            Cannot fetch configuration — cluster is disconnected.
           </p>
         );
 
@@ -545,20 +673,6 @@ export function ClusterDetailClient({
         ) : (
           <p className="text-muted-foreground py-8 text-center">
             Cannot fetch Helm releases — cluster is disconnected.
-          </p>
-        );
-
-      case "logs":
-        return info.connected ? (
-          <div className="space-y-4">
-            <p className="text-muted-foreground text-sm">
-              Select a pod from the Pods section to view its logs, or click on a pod below.
-            </p>
-            <PodTable pods={pods} onSelect={(p) => handleViewLogs(p)} />
-          </div>
-        ) : (
-          <p className="text-muted-foreground py-8 text-center">
-            Cannot fetch logs — cluster is disconnected.
           </p>
         );
 
@@ -594,56 +708,6 @@ export function ClusterDetailClient({
 
   return (
     <>
-      <FadeIn delay={0.05}>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refresh}
-            disabled={isRefreshing}
-          >
-            <RefreshCw
-              className={`mr-1 size-3.5 ${isRefreshing ? "animate-spin text-primary" : ""}`}
-            />
-            Refresh
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsPaused((p) => !p)}
-          >
-            {isPaused ? (
-              <Play className="mr-1 size-3.5" />
-            ) : (
-              <Pause className="mr-1 size-3.5" />
-            )}
-            {isPaused ? "Resume" : "Pause"}
-          </Button>
-          {info.connected && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCreateDialogOpen(true)}
-              className="border-primary/30 text-primary hover:bg-primary/5"
-            >
-              <Plus className="mr-1 size-3.5" />
-              Create Resource
-            </Button>
-          )}
-          {isResourceSection && info.connected && (
-            <NamespaceSelector
-              namespaces={namespaces}
-              value={namespace}
-              onChange={handleNamespaceChange}
-            />
-          )}
-          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1">
-            <span className="size-1.5 rounded-full bg-emerald-500" />
-            <span className="text-muted-foreground text-xs">{lastUpdated.toLocaleTimeString()}</span>
-          </div>
-        </div>
-      </FadeIn>
-
       {hasError && (
         <FadeIn delay={0.05}>
           <Alert variant="destructive">
@@ -718,7 +782,6 @@ export function ClusterDetailClient({
         namespace={namespace}
         onSuccess={() => {
           handleMutationRefresh();
-          setServicesSubTab("ingresses");
         }}
       />
 

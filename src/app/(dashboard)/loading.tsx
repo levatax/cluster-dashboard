@@ -4,18 +4,22 @@ export default function HomeLoading() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div className="space-y-2">
+        <div className="flex items-center gap-3">
           <Skeleton className="h-8 w-32" />
-          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-6 w-8 rounded-full" />
         </div>
-        <Skeleton className="h-10 w-36" />
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-9 w-32" />
+          <Skeleton className="h-9 w-28" />
+        </div>
       </div>
+      <Skeleton className="h-9 w-full" />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (
           <Skeleton
             key={i}
-            className="h-32 rounded-xl"
-            style={{ animationDelay: `${i * 0.1}s` }}
+            className="h-[120px] rounded-xl"
+            style={{ animationDelay: `${i * 0.08}s` }}
           />
         ))}
       </div>

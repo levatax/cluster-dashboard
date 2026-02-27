@@ -1,8 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FileCode, GitBranch, Box } from "lucide-react";
+import { FileCode, GitBranch, Box, Lock } from "lucide-react";
 import type { RepoAnalysis } from "@/app/actions/github-deploy";
 
 interface DeployPreviewProps {
@@ -13,70 +12,67 @@ export function DeployPreview({ analysis }: DeployPreviewProps) {
   const { repoInfo, deployType } = analysis;
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <GitBranch className="size-4" />
-          {repoInfo.fullName}
-        </CardTitle>
-        {repoInfo.description && (
-          <p className="text-sm text-muted-foreground">{repoInfo.description}</p>
-        )}
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap gap-2">
-          {repoInfo.language && (
-            <Badge variant="secondary" className="text-xs">
-              {repoInfo.language}
-            </Badge>
+    <div className="space-y-2">
+      {/* Repo info row */}
+      <div className="flex items-center gap-2.5 rounded-lg border px-3 py-2.5">
+        <GitBranch className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <span className="font-mono text-sm font-medium">{repoInfo.fullName}</span>
+          {repoInfo.description && (
+            <span className="ml-2 hidden text-[11px] text-muted-foreground sm:inline">
+              {repoInfo.description}
+            </span>
           )}
-          <Badge variant="outline" className="text-xs">
-            {repoInfo.defaultBranch}
-          </Badge>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {repoInfo.language && (
+            <Badge variant="secondary" className="text-xs">{repoInfo.language}</Badge>
+          )}
+          <Badge variant="outline" className="text-xs">{repoInfo.defaultBranch}</Badge>
           {repoInfo.private && (
-            <Badge variant="outline" className="text-xs border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400">
+            <Badge
+              variant="outline"
+              className="text-xs border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
+            >
+              <Lock className="mr-1 size-3" />
               Private
             </Badge>
           )}
         </div>
+      </div>
 
-        <div className="rounded-md border border-border bg-muted/50 p-3">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            {deployType.type === "cluster-deploy" && (
-              <>
-                <FileCode className="size-4 text-emerald-500" />
-                <span>Found .cluster-deploy.yaml</span>
-              </>
-            )}
-            {deployType.type === "kubernetes-manifests" && (
-              <>
-                <FileCode className="size-4 text-blue-500" />
-                <span>Found {deployType.paths.length} Kubernetes manifest{deployType.paths.length > 1 ? "s" : ""}</span>
-              </>
-            )}
-            {deployType.type === "dockerfile" && (
-              <>
-                <Box className="size-4 text-purple-500" />
-                <span>Found Dockerfile{deployType.port ? ` (port ${deployType.port})` : ""}</span>
-              </>
-            )}
-            {deployType.type === "unknown" && (
-              <>
-                <Box className="size-4 text-muted-foreground" />
-                <span>No deploy config detected — configure manually</span>
-              </>
-            )}
-          </div>
-
+      {/* Deploy type row */}
+      <div className="flex items-start gap-2.5 rounded-lg border px-3 py-2.5">
+        {deployType.type === "cluster-deploy" && (
+          <FileCode className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+        )}
+        {deployType.type === "kubernetes-manifests" && (
+          <FileCode className="mt-0.5 size-4 shrink-0 text-blue-500" />
+        )}
+        {deployType.type === "dockerfile" && (
+          <Box className="mt-0.5 size-4 shrink-0 text-purple-500" />
+        )}
+        {deployType.type === "unknown" && (
+          <Box className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        )}
+        <div className="min-w-0">
+          <span className="text-sm font-medium">
+            {deployType.type === "cluster-deploy" && "cluster-deploy.yaml detected"}
+            {deployType.type === "kubernetes-manifests" &&
+              `${deployType.paths.length} Kubernetes manifest${deployType.paths.length > 1 ? "s" : ""} detected`}
+            {deployType.type === "dockerfile" &&
+              `Dockerfile detected${deployType.port ? ` · port ${deployType.port}` : ""}`}
+            {deployType.type === "unknown" && "No deploy config — configure manually"}
+          </span>
           {deployType.type === "kubernetes-manifests" && (
-            <ul className="mt-2 space-y-0.5">
+            <ul className="mt-1 space-y-0.5">
               {deployType.paths.map((p) => (
-                <li key={p} className="text-xs text-muted-foreground font-mono">{p}</li>
+                <li key={p} className="font-mono text-[11px] text-muted-foreground">{p}</li>
               ))}
             </ul>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

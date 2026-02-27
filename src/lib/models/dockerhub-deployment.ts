@@ -20,12 +20,14 @@ const DockerhubDeploymentSchema = new Schema<IDockerhubDeployment>(
     deploy_config: { type: Schema.Types.Mixed, required: true, default: {} },
     release_name: { type: String, required: true },
     namespace: { type: String, required: true, default: "default" },
-    status: { type: String, required: true, default: "deploying" },
+    status: { type: String, required: true, default: "deploying", enum: ["deploying", "deployed", "failed"] },
     created_at: { type: Date, default: Date.now },
     updated_at: { type: Date, default: Date.now },
   },
   { collection: "dockerhub_deployments" }
 );
+
+DockerhubDeploymentSchema.index({ cluster_id: 1, created_at: -1 });
 
 export const DockerhubDeploymentModel =
   (mongoose.models.DockerhubDeployment as mongoose.Model<IDockerhubDeployment>) ||

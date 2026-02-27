@@ -17,17 +17,17 @@ interface ResourceGaugeChartProps {
 }
 
 function getGaugeColor(value: number | null): string {
-  if (value == null) return "hsl(var(--muted-foreground))";
-  if (value >= 85) return "hsl(0 84% 60%)"; // red
-  if (value >= 70) return "hsl(38 92% 50%)"; // amber
-  return "hsl(142 76% 36%)"; // green
+  if (value == null) return "var(--color-muted-foreground)";
+  if (value >= 85) return "var(--color-destructive)";
+  if (value >= 70) return "var(--color-warning, hsl(38 92% 50%))";
+  return "var(--color-success, hsl(142 76% 36%))";
 }
 
 function getGaugeTrackColor(value: number | null): string {
-  if (value == null) return "hsl(var(--muted))";
-  if (value >= 85) return "hsl(0 84% 60% / 0.15)";
-  if (value >= 70) return "hsl(38 92% 50% / 0.15)";
-  return "hsl(142 76% 36% / 0.15)";
+  if (value == null) return "var(--color-muted)";
+  if (value >= 85) return "color-mix(in oklch, var(--color-destructive) 15%, transparent)";
+  if (value >= 70) return "color-mix(in oklch, var(--color-warning, hsl(38 92% 50%)) 15%, transparent)";
+  return "color-mix(in oklch, var(--color-success, hsl(142 76% 36%)) 15%, transparent)";
 }
 
 export function ResourceGaugeChart({

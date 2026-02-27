@@ -25,8 +25,8 @@ export default async function ComparePage({ searchParams }: Props) {
   const clusters = await Promise.all(
     clusterIds.map((id) => getClusterById(id))
   );
-  const validClusters = clusters.filter(Boolean);
-  if (validClusters.length < 2) redirect("/");
+  const validCount = clusters.filter(Boolean).length;
+  if (validCount < 2) redirect("/");
 
   // Fetch info, health, and nodes for all clusters in parallel
   const [infoResults, healthResults, nodesResults] = await Promise.all([
@@ -35,14 +35,23 @@ export default async function ComparePage({ searchParams }: Props) {
     Promise.all(clusterIds.map((id) => fetchNodes(id))),
   ]);
 
-  const comparisonData = clusterIds.map((id, i) => ({
-    id,
-    name: validClusters[i]!.name,
-    server: validClusters[i]!.server,
-    info: infoResults[i].success ? infoResults[i].data : null,
-    health: healthResults[i].success ? healthResults[i].data : null,
-    nodes: nodesResults[i].success ? nodesResults[i].data : [],
-  }));
+  const comparisonData = clusterIds
+    .map((id, i) => ({
+      id,
+      cluster: clusters[i],
+      info: infoResults[i],
+      health: healthResults[i],
+      nodes: nodesResults[i],
+    }))
+    .filter((x): x is typeof x & { cluster: NonNullable<typeof x.cluster> } => x.cluster !== null)
+    .map((x) => ({
+      id: x.id,
+      name: x.cluster.name,
+      server: x.cluster.server,
+      info: x.info.success ? x.info.data : null,
+      health: x.health.success ? x.health.data : null,
+      nodes: x.nodes.success ? x.nodes.data : [],
+    }));
 
   return (
     <PageTransition>

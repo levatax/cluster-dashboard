@@ -1,6 +1,7 @@
 "use server";
 
 import { getDeploymentHistory, type DeploymentHistoryRow } from "@/lib/db";
+import { requireSession } from "@/lib/auth";
 
 type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -9,6 +10,7 @@ export async function fetchDeploymentHistory(
   limit = 100
 ): Promise<ActionResult<DeploymentHistoryRow[]>> {
   try {
+    await requireSession();
     const history = await getDeploymentHistory(clusterId, limit);
     return { success: true, data: history };
   } catch (e) {

@@ -15,6 +15,8 @@ export type {
   PersistentVolumeInfo,
   PersistentVolumeClaimInfo,
   StorageClassInfo,
+  ConfigMapInfo,
+  SecretInfo,
 } from "@/lib/types";
 
 import type {
@@ -31,19 +33,23 @@ import type {
   PersistentVolumeInfo,
   PersistentVolumeClaimInfo,
   StorageClassInfo,
+  ConfigMapInfo,
+  SecretInfo,
 } from "@/lib/types";
 
-function createKubeConfig(yaml: string): k8s.KubeConfig {
+export function createKubeConfig(yaml: string): k8s.KubeConfig {
   const kc = new k8s.KubeConfig();
   kc.loadFromString(yaml);
   return kc;
 }
 
 export function parseCpuValue(cpu: string): number {
+  if (!cpu) return 0;
   if (cpu.endsWith("n")) return parseInt(cpu, 10) / 1_000_000;
   if (cpu.endsWith("u")) return parseInt(cpu, 10) / 1_000;
   if (cpu.endsWith("m")) return parseInt(cpu, 10);
-  return parseFloat(cpu) * 1000;
+  const val = parseFloat(cpu);
+  return isNaN(val) ? 0 : val * 1000;
 }
 
 export function parseMemoryValue(mem: string): number {
@@ -88,63 +94,74 @@ function formatMemory(kilobytes: string): string {
   return `${mi.toFixed(0)} Mi`;
 }
 
-export async function checkConnection(yaml: string): Promise<boolean> {
+export type ConnectionStatus = "connected" | "parse_error" | "auth_error" | "network_error" | "unknown_error";
+
+export async function checkConnection(yaml: string): Promise<ConnectionStatus> {
+  let kc: k8s.KubeConfig;
   try {
-    const kc = createKubeConfig(yaml);
+    kc = createKubeConfig(yaml);
+  } catch {
+    return "parse_error";
+  }
+  try {
     const api = kc.makeApiClient(k8s.VersionApi);
     await api.getCode();
-    return true;
-  } catch {
-    return false;
+    return "connected";
+  } catch (e: unknown) {
+    const status = (e as { response?: { statusCode?: number } })?.response?.statusCode;
+    if (status === 401 || status === 403) return "auth_error";
+    const code = (e as { code?: string })?.code;
+    if (code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ETIMEDOUT") return "network_error";
+    return "unknown_error";
   }
 }
 
-export async function getClusterVersion(yaml: string): Promise<string> {
-  const kc = createKubeConfig(yaml);
+export async function getClusterVersion(yamlOrKc: string | k8s.KubeConfig): Promise<string> {
+  const kc = typeof yamlOrKc === "string" ? createKubeConfig(yamlOrKc) : yamlOrKc;
   const api = kc.makeApiClient(k8s.VersionApi);
   const version = await api.getCode();
   return `${version.major}.${version.minor}`;
 }
 
-export async function getNodes(yaml: string): Promise<NodeInfo[]> {
-  const kc = createKubeConfig(yaml);
+export function mapV1NodeToNodeInfo(node: k8s.V1Node): NodeInfo {
+  const labels = node.metadata?.labels || {};
+  const roles = Object.keys(labels)
+    .filter((l) => l.startsWith("node-role.kubernetes.io/"))
+    .map((l) => l.replace("node-role.kubernetes.io/", ""));
+  if (roles.length === 0) roles.push("<none>");
+
+  const conditions = node.status?.conditions || [];
+  const readyCondition = conditions.find((c) => c.type === "Ready");
+  const status = readyCondition?.status === "True" ? "Ready" : "NotReady";
+
+  const addresses = node.status?.addresses || [];
+  const internalIP =
+    addresses.find((a) => a.type === "InternalIP")?.address || "";
+
+  const capacity = node.status?.capacity || {};
+
+  return {
+    name: node.metadata?.name || "",
+    status,
+    roles,
+    age: node.metadata?.creationTimestamp
+      ? calculateAge(new Date(node.metadata.creationTimestamp))
+      : "",
+    version: node.status?.nodeInfo?.kubeletVersion || "",
+    os: node.status?.nodeInfo?.operatingSystem || "",
+    arch: node.status?.nodeInfo?.architecture || "",
+    cpu: capacity.cpu || "",
+    memory: capacity.memory ? formatMemory(capacity.memory) : "",
+    internalIP,
+    schedulable: !node.spec?.unschedulable,
+  };
+}
+
+export async function getNodes(yamlOrKc: string | k8s.KubeConfig): Promise<NodeInfo[]> {
+  const kc = typeof yamlOrKc === "string" ? createKubeConfig(yamlOrKc) : yamlOrKc;
   const api = kc.makeApiClient(k8s.CoreV1Api);
   const response = await api.listNode();
-  const nodes = response.items;
-
-  return nodes.map((node) => {
-    const labels = node.metadata?.labels || {};
-    const roles = Object.keys(labels)
-      .filter((l) => l.startsWith("node-role.kubernetes.io/"))
-      .map((l) => l.replace("node-role.kubernetes.io/", ""));
-    if (roles.length === 0) roles.push("<none>");
-
-    const conditions = node.status?.conditions || [];
-    const readyCondition = conditions.find((c) => c.type === "Ready");
-    const status = readyCondition?.status === "True" ? "Ready" : "NotReady";
-
-    const addresses = node.status?.addresses || [];
-    const internalIP =
-      addresses.find((a) => a.type === "InternalIP")?.address || "";
-
-    const capacity = node.status?.capacity || {};
-
-    return {
-      name: node.metadata?.name || "",
-      status,
-      roles,
-      age: node.metadata?.creationTimestamp
-        ? calculateAge(new Date(node.metadata.creationTimestamp))
-        : "",
-      version: node.status?.nodeInfo?.kubeletVersion || "",
-      os: node.status?.nodeInfo?.operatingSystem || "",
-      arch: node.status?.nodeInfo?.architecture || "",
-      cpu: capacity.cpu || "",
-      memory: capacity.memory ? formatMemory(capacity.memory) : "",
-      internalIP,
-      schedulable: !node.spec?.unschedulable,
-    };
-  });
+  return response.items.map(mapV1NodeToNodeInfo);
 }
 
 export async function getClusterInfo(yaml: string): Promise<ClusterInfo> {
@@ -154,8 +171,8 @@ export async function getClusterInfo(yaml: string): Promise<ClusterInfo> {
   const cluster = context ? kc.getCluster(context.cluster) : null;
 
   const [version, nodes] = await Promise.all([
-    getClusterVersion(yaml),
-    getNodes(yaml),
+    getClusterVersion(kc),
+    getNodes(kc),
   ]);
 
   return {
@@ -177,7 +194,7 @@ export async function getNamespaces(yaml: string): Promise<string[]> {
     .sort();
 }
 
-function derivePodStatus(pod: k8s.V1Pod): string {
+export function derivePodStatus(pod: k8s.V1Pod): string {
   const phase = pod.status?.phase || "Unknown";
   const containerStatuses = pod.status?.containerStatuses || [];
   const conditions = pod.status?.conditions || [];
@@ -230,6 +247,53 @@ function derivePodStatus(pod: k8s.V1Pod): string {
   return phase;
 }
 
+export function mapV1PodToPodInfo(pod: k8s.V1Pod): PodInfo {
+  const containerStatuses = pod.status?.containerStatuses || [];
+  const readyCount = containerStatuses.filter((c) => c.ready).length;
+  const totalCount = (pod.spec?.containers || []).length;
+  const restarts = containerStatuses.reduce(
+    (sum, c) => sum + (c.restartCount || 0),
+    0
+  );
+
+  return {
+    name: pod.metadata?.name || "",
+    namespace: pod.metadata?.namespace || "",
+    status: derivePodStatus(pod),
+    ready: `${readyCount}/${totalCount}`,
+    restarts,
+    age: pod.metadata?.creationTimestamp
+      ? calculateAge(new Date(pod.metadata.creationTimestamp))
+      : "",
+    node: pod.spec?.nodeName || "",
+    ip: pod.status?.podIP || "",
+    labels: (pod.metadata?.labels as Record<string, string>) || {},
+    annotations: (pod.metadata?.annotations as Record<string, string>) || {},
+    containers: (pod.spec?.containers || []).map((c) => {
+      const cs = containerStatuses.find((s) => s.name === c.name);
+      const state = cs?.state?.running
+        ? "Running"
+        : cs?.state?.waiting
+          ? "Waiting"
+          : cs?.state?.terminated
+            ? "Terminated"
+            : "Unknown";
+      const reason =
+        cs?.state?.waiting?.reason ||
+        cs?.state?.terminated?.reason ||
+        "";
+      return {
+        name: c.name,
+        image: c.image || "",
+        ready: cs?.ready || false,
+        restarts: cs?.restartCount || 0,
+        state,
+        reason,
+      };
+    }),
+  };
+}
+
 export async function getPods(
   yaml: string,
   namespace?: string
@@ -239,53 +303,7 @@ export async function getPods(
   const response = namespace
     ? await api.listNamespacedPod({ namespace })
     : await api.listPodForAllNamespaces();
-
-  return response.items.map((pod) => {
-    const containerStatuses = pod.status?.containerStatuses || [];
-    const readyCount = containerStatuses.filter((c) => c.ready).length;
-    const totalCount = (pod.spec?.containers || []).length;
-    const restarts = containerStatuses.reduce(
-      (sum, c) => sum + (c.restartCount || 0),
-      0
-    );
-
-    return {
-      name: pod.metadata?.name || "",
-      namespace: pod.metadata?.namespace || "",
-      status: derivePodStatus(pod),
-      ready: `${readyCount}/${totalCount}`,
-      restarts,
-      age: pod.metadata?.creationTimestamp
-        ? calculateAge(new Date(pod.metadata.creationTimestamp))
-        : "",
-      node: pod.spec?.nodeName || "",
-      ip: pod.status?.podIP || "",
-      labels: (pod.metadata?.labels as Record<string, string>) || {},
-      annotations: (pod.metadata?.annotations as Record<string, string>) || {},
-      containers: (pod.spec?.containers || []).map((c) => {
-        const cs = containerStatuses.find((s) => s.name === c.name);
-        const state = cs?.state?.running
-          ? "Running"
-          : cs?.state?.waiting
-            ? "Waiting"
-            : cs?.state?.terminated
-              ? "Terminated"
-              : "Unknown";
-        const reason =
-          cs?.state?.waiting?.reason ||
-          cs?.state?.terminated?.reason ||
-          "";
-        return {
-          name: c.name,
-          image: c.image || "",
-          ready: cs?.ready || false,
-          restarts: cs?.restartCount || 0,
-          state,
-          reason,
-        };
-      }),
-    };
-  });
+  return response.items.map(mapV1PodToPodInfo);
 }
 
 export async function getPodsByLabelSelector(
@@ -299,53 +317,33 @@ export async function getPodsByLabelSelector(
     .map(([k, v]) => `${k}=${v}`)
     .join(",");
   const response = await api.listNamespacedPod({ namespace, labelSelector: selectorStr });
+  return response.items.map(mapV1PodToPodInfo);
+}
 
-  return response.items.map((pod) => {
-    const containerStatuses = pod.status?.containerStatuses || [];
-    const readyCount = containerStatuses.filter((c) => c.ready).length;
-    const totalCount = (pod.spec?.containers || []).length;
-    const restarts = containerStatuses.reduce(
-      (sum, c) => sum + (c.restartCount || 0),
-      0
-    );
+export function mapV1DeploymentToDeploymentInfo(dep: k8s.V1Deployment): DeploymentInfo {
+  const desired = dep.spec?.replicas ?? 0;
+  const ready = dep.status?.readyReplicas ?? 0;
 
-    return {
-      name: pod.metadata?.name || "",
-      namespace: pod.metadata?.namespace || "",
-      status: derivePodStatus(pod),
-      ready: `${readyCount}/${totalCount}`,
-      restarts,
-      age: pod.metadata?.creationTimestamp
-        ? calculateAge(new Date(pod.metadata.creationTimestamp))
-        : "",
-      node: pod.spec?.nodeName || "",
-      ip: pod.status?.podIP || "",
-      labels: (pod.metadata?.labels as Record<string, string>) || {},
-      annotations: (pod.metadata?.annotations as Record<string, string>) || {},
-      containers: (pod.spec?.containers || []).map((c) => {
-        const cs = containerStatuses.find((s) => s.name === c.name);
-        const state = cs?.state?.running
-          ? "Running"
-          : cs?.state?.waiting
-            ? "Waiting"
-            : cs?.state?.terminated
-              ? "Terminated"
-              : "Unknown";
-        const reason =
-          cs?.state?.waiting?.reason ||
-          cs?.state?.terminated?.reason ||
-          "";
-        return {
-          name: c.name,
-          image: c.image || "",
-          ready: cs?.ready || false,
-          restarts: cs?.restartCount || 0,
-          state,
-          reason,
-        };
-      }),
-    };
-  });
+  return {
+    name: dep.metadata?.name || "",
+    namespace: dep.metadata?.namespace || "",
+    ready: `${ready}/${desired}`,
+    replicas: desired,
+    upToDate: dep.status?.updatedReplicas ?? 0,
+    available: dep.status?.availableReplicas ?? 0,
+    age: dep.metadata?.creationTimestamp
+      ? calculateAge(new Date(dep.metadata.creationTimestamp))
+      : "",
+    labels: (dep.metadata?.labels as Record<string, string>) || {},
+    annotations: (dep.metadata?.annotations as Record<string, string>) || {},
+    selector: (dep.spec?.selector?.matchLabels as Record<string, string>) || {},
+    conditions: (dep.status?.conditions || []).map((c) => ({
+      type: c.type,
+      status: c.status,
+      reason: c.reason || "",
+      message: c.message || "",
+    })),
+  };
 }
 
 export async function getDeployments(
@@ -357,32 +355,7 @@ export async function getDeployments(
   const response = namespace
     ? await api.listNamespacedDeployment({ namespace })
     : await api.listDeploymentForAllNamespaces();
-
-  return response.items.map((dep) => {
-    const desired = dep.spec?.replicas ?? 0;
-    const ready = dep.status?.readyReplicas ?? 0;
-
-    return {
-      name: dep.metadata?.name || "",
-      namespace: dep.metadata?.namespace || "",
-      ready: `${ready}/${desired}`,
-      replicas: desired,
-      upToDate: dep.status?.updatedReplicas ?? 0,
-      available: dep.status?.availableReplicas ?? 0,
-      age: dep.metadata?.creationTimestamp
-        ? calculateAge(new Date(dep.metadata.creationTimestamp))
-        : "",
-      labels: (dep.metadata?.labels as Record<string, string>) || {},
-      annotations: (dep.metadata?.annotations as Record<string, string>) || {},
-      selector: (dep.spec?.selector?.matchLabels as Record<string, string>) || {},
-      conditions: (dep.status?.conditions || []).map((c) => ({
-        type: c.type,
-        status: c.status,
-        reason: c.reason || "",
-        message: c.message || "",
-      })),
-    };
-  });
+  return response.items.map(mapV1DeploymentToDeploymentInfo);
 }
 
 export async function getServices(
@@ -557,6 +530,26 @@ export async function getPodMetrics(
   });
 }
 
+export function mapV1EventToClusterEventInfo(ev: k8s.CoreV1Event): ClusterEventInfo {
+  return {
+    name: ev.metadata?.name || "",
+    namespace: ev.metadata?.namespace || "",
+    type: ev.type || "Normal",
+    reason: ev.reason || "",
+    message: ev.message || "",
+    involvedObject: `${ev.involvedObject?.kind || ""}/${ev.involvedObject?.name || ""}`,
+    source: ev.source?.component || "",
+    count: ev.count || 1,
+    firstTimestamp: ev.firstTimestamp ? new Date(ev.firstTimestamp).toISOString() : null,
+    lastTimestamp: ev.lastTimestamp ? new Date(ev.lastTimestamp).toISOString() : null,
+    age: ev.lastTimestamp
+      ? calculateAge(new Date(ev.lastTimestamp))
+      : ev.metadata?.creationTimestamp
+        ? calculateAge(new Date(ev.metadata.creationTimestamp))
+        : "",
+  };
+}
+
 export async function getEvents(
   yaml: string,
   namespace?: string
@@ -568,23 +561,7 @@ export async function getEvents(
     : await api.listEventForAllNamespaces();
 
   return response.items
-    .map((ev) => ({
-      name: ev.metadata?.name || "",
-      namespace: ev.metadata?.namespace || "",
-      type: ev.type || "Normal",
-      reason: ev.reason || "",
-      message: ev.message || "",
-      involvedObject: `${ev.involvedObject?.kind || ""}/${ev.involvedObject?.name || ""}`,
-      source: ev.source?.component || "",
-      count: ev.count || 1,
-      firstTimestamp: ev.firstTimestamp ? new Date(ev.firstTimestamp).toISOString() : null,
-      lastTimestamp: ev.lastTimestamp ? new Date(ev.lastTimestamp).toISOString() : null,
-      age: ev.lastTimestamp
-        ? calculateAge(new Date(ev.lastTimestamp))
-        : ev.metadata?.creationTimestamp
-          ? calculateAge(new Date(ev.metadata.creationTimestamp))
-          : "",
-    }))
+    .map(mapV1EventToClusterEventInfo)
     .sort((a, b) => {
       const ta = a.lastTimestamp || a.firstTimestamp || "";
       const tb = b.lastTimestamp || b.firstTimestamp || "";
@@ -672,6 +649,67 @@ export async function getClusterHealthSummary(
   };
 }
 
+// --- ConfigMaps & Secrets ---
+
+export async function getConfigMaps(
+  yaml: string,
+  namespace?: string
+): Promise<ConfigMapInfo[]> {
+  const kc = createKubeConfig(yaml);
+  const api = kc.makeApiClient(k8s.CoreV1Api);
+  const response = namespace
+    ? await api.listNamespacedConfigMap({ namespace })
+    : await api.listConfigMapForAllNamespaces();
+
+  return response.items.map((cm) => {
+    const dataKeys = Object.keys(cm.data || {});
+    const binaryDataKeys = Object.keys(cm.binaryData || {});
+
+    return {
+      name: cm.metadata?.name || "",
+      namespace: cm.metadata?.namespace || "",
+      keys: dataKeys,
+      keyCount: dataKeys.length + binaryDataKeys.length,
+      age: cm.metadata?.creationTimestamp
+        ? calculateAge(new Date(cm.metadata.creationTimestamp))
+        : "",
+      labels: (cm.metadata?.labels as Record<string, string>) || {},
+      annotations: (cm.metadata?.annotations as Record<string, string>) || {},
+      data: (cm.data as Record<string, string>) || {},
+      binaryDataKeys,
+    };
+  });
+}
+
+export async function getSecrets(
+  yaml: string,
+  namespace?: string
+): Promise<SecretInfo[]> {
+  const kc = createKubeConfig(yaml);
+  const api = kc.makeApiClient(k8s.CoreV1Api);
+  const response = namespace
+    ? await api.listNamespacedSecret({ namespace })
+    : await api.listSecretForAllNamespaces();
+
+  return response.items.map((secret) => {
+    const dataKeys = Object.keys(secret.data || {});
+
+    return {
+      name: secret.metadata?.name || "",
+      namespace: secret.metadata?.namespace || "",
+      type: secret.type || "Opaque",
+      keys: dataKeys,
+      keyCount: dataKeys.length,
+      age: secret.metadata?.creationTimestamp
+        ? calculateAge(new Date(secret.metadata.creationTimestamp))
+        : "",
+      labels: (secret.metadata?.labels as Record<string, string>) || {},
+      annotations: (secret.metadata?.annotations as Record<string, string>) || {},
+      data: (secret.data as Record<string, string>) || {},
+    };
+  });
+}
+
 // --- Mutating operations ---
 
 export async function cordonNode(yaml: string, nodeName: string): Promise<void> {
@@ -695,7 +733,7 @@ export async function uncordonNode(yaml: string, nodeName: string): Promise<void
 export async function drainNode(
   yaml: string,
   nodeName: string,
-  options?: { ignoreDaemonSets?: boolean }
+  options?: { skipDaemonSets?: boolean }
 ): Promise<{ evicted: string[]; errors: string[] }> {
   const kc = createKubeConfig(yaml);
   const api = kc.makeApiClient(k8s.CoreV1Api);
@@ -703,44 +741,50 @@ export async function drainNode(
   // Step 1: Cordon the node
   await cordonNode(yaml, nodeName);
 
-  // Step 2: List pods on the node
-  const podList = await api.listPodForAllNamespaces({
-    fieldSelector: `spec.nodeName=${nodeName}`,
-  });
+  try {
+    // Step 2: List pods on the node
+    const podList = await api.listPodForAllNamespaces({
+      fieldSelector: `spec.nodeName=${nodeName}`,
+    });
 
-  const evicted: string[] = [];
-  const errors: string[] = [];
+    const evicted: string[] = [];
+    const errors: string[] = [];
 
-  for (const pod of podList.items) {
-    const ns = pod.metadata?.namespace || "";
-    const name = pod.metadata?.name || "";
+    for (const pod of podList.items) {
+      const ns = pod.metadata?.namespace || "";
+      const name = pod.metadata?.name || "";
 
-    // Skip mirror pods (static pods)
-    if (pod.metadata?.annotations?.["kubernetes.io/config.mirror"]) continue;
+      // Skip mirror pods (static pods)
+      if (pod.metadata?.annotations?.["kubernetes.io/config.mirror"]) continue;
 
-    // Skip DaemonSet pods if requested
-    if (options?.ignoreDaemonSets !== false) {
-      const ownerRefs = pod.metadata?.ownerReferences || [];
-      if (ownerRefs.some((ref) => ref.kind === "DaemonSet")) continue;
+      // Skip DaemonSet pods (default: true)
+      if (options?.skipDaemonSets !== false) {
+        const ownerRefs = pod.metadata?.ownerReferences || [];
+        if (ownerRefs.some((ref) => ref.kind === "DaemonSet")) continue;
+      }
+
+      try {
+        await api.createNamespacedPodEviction({
+          name,
+          namespace: ns,
+          body: {
+            apiVersion: "policy/v1",
+            kind: "Eviction",
+            metadata: { name, namespace: ns },
+          },
+        });
+        evicted.push(`${ns}/${name}`);
+      } catch (e) {
+        errors.push(`${ns}/${name}: ${e instanceof Error ? e.message : "eviction failed"}`);
+      }
     }
 
-    try {
-      await api.createNamespacedPodEviction({
-        name,
-        namespace: ns,
-        body: {
-          apiVersion: "policy/v1",
-          kind: "Eviction",
-          metadata: { name, namespace: ns },
-        },
-      });
-      evicted.push(`${ns}/${name}`);
-    } catch (e) {
-      errors.push(`${ns}/${name}: ${e instanceof Error ? e.message : "eviction failed"}`);
-    }
+    return { evicted, errors };
+  } catch (e) {
+    // Roll back cordon if eviction process fails
+    try { await uncordonNode(yaml, nodeName); } catch { /* best effort */ }
+    throw e;
   }
-
-  return { evicted, errors };
 }
 
 export async function scaleDeployment(
@@ -784,9 +828,18 @@ export async function applyResourceYaml(
   const spec = resourceSpec as k8s.KubernetesObject & {
     metadata: { name: string; namespace?: string };
   };
+  let exists = false;
   try {
-    // Try to read first — if it exists, patch it
     await client.read(spec);
+    exists = true;
+  } catch (e: unknown) {
+    const status =
+      (e as { code?: number })?.code ??
+      (e as { httpStatusCode?: number })?.httpStatusCode ??
+      (e as { response?: { statusCode?: number } })?.response?.statusCode;
+    if (status !== 404) throw e;
+  }
+  if (exists) {
     const response = await client.patch(
       spec,
       undefined,
@@ -796,8 +849,7 @@ export async function applyResourceYaml(
       k8s.PatchStrategy.StrategicMergePatch
     );
     return JSON.parse(JSON.stringify(response)) as object;
-  } catch {
-    // Resource doesn't exist — create it
+  } else {
     const response = await client.create(spec);
     return JSON.parse(JSON.stringify(response)) as object;
   }
@@ -958,10 +1010,25 @@ export async function getBuildJobStatus(
       if (pod) {
         // Check init container failures (git-clone)
         const initStatuses = pod.status?.initContainerStatuses || [];
+        const podName = pod.metadata?.name || "";
         for (const cs of initStatuses) {
           if (cs.state?.terminated && cs.state.terminated.exitCode !== 0) {
             message = `Init container '${cs.name}' failed (exit code ${cs.state.terminated.exitCode})`;
             if (cs.state.terminated.reason) message += `: ${cs.state.terminated.reason}`;
+            // Try to get the actual logs from the failed init container
+            if (podName) {
+              try {
+                const logOutput = await getPodLogSnapshot(kubeconfig, namespace, podName, cs.name, 10);
+                if (logOutput.trim()) {
+                  // Extract the last meaningful line as the error detail
+                  const lines = logOutput.trim().split("\n").filter((l) => l.trim());
+                  const lastLine = lines[lines.length - 1] || "";
+                  if (lastLine) message += `\n${lastLine}`;
+                }
+              } catch {
+                // Log retrieval failed, keep the basic message
+              }
+            }
             break;
           }
           if (cs.state?.waiting?.reason) {
@@ -1012,16 +1079,17 @@ export async function getBuildLogs(
     labelSelector: `job-name=${jobName}`,
   });
 
-  const pod = podList.items[0];
+  const pod = podList.items[podList.items.length - 1];
   if (!pod) return "";
   const podName = pod.metadata?.name || "";
   if (!podName) return "";
 
-  // Use git-clone container if init container hasn't finished yet
+  // Use git-clone container if it's still running OR if it failed
   const initStatuses = pod.status?.initContainerStatuses || [];
   const gitCloneStatus = initStatuses.find((s) => s.name === "git-clone");
   const isInitRunning = gitCloneStatus && !gitCloneStatus.state?.terminated;
-  const container = isInitRunning ? "git-clone" : "kaniko";
+  const isInitFailed = gitCloneStatus?.state?.terminated && gitCloneStatus.state.terminated.exitCode !== 0;
+  const container = isInitRunning || isInitFailed ? "git-clone" : "kaniko";
 
   try {
     return await getPodLogSnapshot(kubeconfig, namespace, podName, container, tailLines);
@@ -1052,17 +1120,6 @@ export async function createNamespace(yaml: string, name: string): Promise<void>
       metadata: { name },
     },
   });
-}
-
-export async function namespaceExists(yaml: string, name: string): Promise<boolean> {
-  const kc = createKubeConfig(yaml);
-  const api = kc.makeApiClient(k8s.CoreV1Api);
-  try {
-    await api.readNamespace({ name });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // --- Storage resources ---
