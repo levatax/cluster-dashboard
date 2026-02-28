@@ -413,7 +413,7 @@ const ALLOWED_RESOURCE_KINDS = new Set([
   "Deployment", "Service", "Ingress", "ConfigMap", "Secret",
   "PersistentVolumeClaim", "HorizontalPodAutoscaler", "CronJob", "Job",
   "StatefulSet", "DaemonSet", "Namespace", "ServiceAccount",
-  "NetworkPolicy", "LimitRange", "ResourceQuota",
+  "NetworkPolicy", "LimitRange", "ResourceQuota", "Pod",
 ]);
 
 export async function applyResourceYamlAction(
