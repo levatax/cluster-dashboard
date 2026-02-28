@@ -221,6 +221,137 @@ export async function getBuildLogsAction(
   }
 }
 
+export async function rebuildGithubDeployment(
+  clusterId: string,
+  deploymentId: string
+): Promise<ActionResult<{ jobName: string; image: string } | null>> {
+  try {
+    await requireSession();
+    const cluster = await getClusterById(clusterId);
+    if (!cluster) return { success: false, error: "Cluster not found" };
+
+    const allDeployments = await getGithubDeployments(clusterId);
+    const deployment = allDeployments.find((d) => d.id === deploymentId);
+    if (!deployment) return { success: false, error: "Deployment not found" };
+
+    const parsed = parseGitHubUrl(deployment.repo_url);
+    if (!parsed) return { success: false, error: "Invalid GitHub URL in deployment" };
+
+    const deployConfig = deployment.deploy_config as {
+      name?: string;
+      namespace?: string;
+      image?: string;
+      port?: number;
+      replicas?: number;
+      env?: Record<string, string>;
+      envVars?: EnvVar[];
+      ingressEnabled?: boolean;
+      ingressHost?: string;
+      manifestPaths?: string[];
+    };
+
+    const name = deployment.release_name;
+    const ns = deployment.namespace;
+    const branch = deployment.branch;
+    const token = deployment.github_token;
+
+    await updateGithubDeploymentStatus(deploymentId, "deploying");
+    await insertDeploymentHistory(clusterId, "github", deploymentId, "redeploy", name, ns, "deploying");
+
+    // If the deployment used manifest files, re-fetch and re-apply them
+    if (deployConfig.manifestPaths && deployConfig.manifestPaths.length > 0) {
+      try {
+        for (const filePath of deployConfig.manifestPaths) {
+          const content = await getFileContent(parsed.owner, parsed.repo, filePath, branch, token);
+          const docs = yaml.loadAll(content) as k8s.KubernetesObject[];
+          for (const doc of docs) {
+            if (doc && typeof doc === "object") {
+              await applyResourceYaml(cluster.kubeconfig_yaml, doc);
+            }
+          }
+        }
+        const sha = await getLatestCommitSha(parsed.owner, parsed.repo, branch, token);
+        await updateGithubDeploymentStatus(deploymentId, "deployed", sha);
+        await insertDeploymentHistory(clusterId, "github", deploymentId, "redeploy", name, ns, "deployed");
+        return { success: true, data: null };
+      } catch (e) {
+        await updateGithubDeploymentStatus(deploymentId, "failed");
+        await insertDeploymentHistory(clusterId, "github", deploymentId, "redeploy", name, ns, "failed", {
+          error: e instanceof Error ? e.message : "Redeploy failed",
+        });
+        return { success: false, error: e instanceof Error ? e.message : "Redeploy failed" };
+      }
+    }
+
+    // If the deployment used a built image, trigger a new build
+    const registryUrl = await getClusterRegistryUrl(clusterId);
+    if (registryUrl) {
+      const sha = await getLatestCommitSha(parsed.owner, parsed.repo, branch, token);
+      const safeName = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 30);
+      const jobName = `build-${safeName}-${sha}`;
+      const image = `${registryUrl}/${safeName}:${sha}`;
+      const repoHttpsUrl = `https://github.com/${parsed.owner}/${parsed.repo}.git`;
+
+      const buildArgs: Record<string, string> = {};
+      const envVars = deployConfig.envVars;
+      if (envVars) {
+        for (const envVar of envVars) {
+          buildArgs[envVar.key] = envVar.value;
+        }
+      }
+
+      await createBuildJob(cluster.kubeconfig_yaml, {
+        jobName,
+        namespace: ns,
+        repoHttpsUrl,
+        githubToken: token || undefined,
+        branch,
+        destination: image,
+        registryUrl,
+        appName: safeName,
+        buildArgs,
+      });
+
+      return { success: true, data: { jobName, image } };
+    }
+
+    // No registry — just re-apply the generated manifests with the existing image
+    try {
+      const manifestYaml = generateDeploymentManifests({
+        name,
+        namespace: ns,
+        image: deployConfig.image || "",
+        port: deployConfig.port || 3000,
+        replicas: deployConfig.replicas || 1,
+        env: deployConfig.env,
+        envVars: deployConfig.envVars,
+        ingress: deployConfig.ingressEnabled
+          ? { enabled: true, host: deployConfig.ingressHost }
+          : undefined,
+      });
+
+      const docs = yaml.loadAll(manifestYaml) as k8s.KubernetesObject[];
+      for (const doc of docs) {
+        if (doc && typeof doc === "object") {
+          await applyResourceYaml(cluster.kubeconfig_yaml, doc);
+        }
+      }
+
+      await updateGithubDeploymentStatus(deploymentId, "deployed");
+      await insertDeploymentHistory(clusterId, "github", deploymentId, "redeploy", name, ns, "deployed");
+      return { success: true, data: null };
+    } catch (e) {
+      await updateGithubDeploymentStatus(deploymentId, "failed");
+      await insertDeploymentHistory(clusterId, "github", deploymentId, "redeploy", name, ns, "failed", {
+        error: e instanceof Error ? e.message : "Redeploy failed",
+      });
+      return { success: false, error: e instanceof Error ? e.message : "Redeploy failed" };
+    }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Failed to rebuild" };
+  }
+}
+
 export async function removeGithubDeployment(
   clusterId: string,
   deploymentId: string

@@ -20,6 +20,7 @@ import {
   deployFromGithub,
   fetchGithubDeployments,
   removeGithubDeployment,
+  rebuildGithubDeployment,
   startBuildAction,
   getBuildStatusAction,
   getBuildLogsAction,
@@ -84,6 +85,7 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
   const [buildImage, setBuildImage] = useState("");
   const [buildLogs, setBuildLogs] = useState("");
   const [buildMessage, setBuildMessage] = useState("");
+  const [rebuildingId, setRebuildingId] = useState<string | null>(null);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [templateSelectorOpen, setTemplateSelectorOpen] = useState(false);
   const [lastDeployedConfig, setLastDeployedConfig] =
@@ -258,6 +260,75 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
     }
   }
 
+  async function handleRebuild(id: string) {
+    setRebuildingId(id);
+    const result = await rebuildGithubDeployment(clusterId, id);
+    if (result.success && result.data) {
+      // Build was started — poll for completion
+      const { jobName, image } = result.data;
+      const deployment = deployments.find((d) => d.id === id);
+      const ns = deployment?.namespace || "default";
+
+      setBuildPhase("building");
+      setBuildJobName(jobName);
+      setBuildImage(image);
+      setBuildLogs("");
+      setBuildMessage("");
+      stopPolling();
+
+      statusPollRef.current = setInterval(async () => {
+        const statusResult = await getBuildStatusAction(clusterId, ns, jobName);
+        if (!statusResult.success) return;
+        const { phase } = statusResult.data;
+        if (phase === "succeeded") {
+          stopPolling();
+          setBuildPhase("succeeded");
+          // Re-apply manifests with the new image
+          const redeployResult = await deployFromGithub(clusterId,
+            deployment!.repo_url, deployment!.branch, deployment!.github_token, {
+              ...(deployment!.deploy_config as Record<string, string | number | boolean>),
+              name: deployment!.release_name,
+              namespace: ns,
+              image,
+              port: (deployment!.deploy_config as { port?: number }).port || 3000,
+              replicas: (deployment!.deploy_config as { replicas?: number }).replicas || 1,
+            });
+          if (redeployResult.success) {
+            toast.success("Rebuild & deploy succeeded");
+          } else {
+            toast.error(redeployResult.error);
+          }
+          setRebuildingId(null);
+          const r = await fetchGithubDeployments(clusterId);
+          if (r.success) setDeployments(r.data);
+        } else if (phase === "failed") {
+          stopPolling();
+          setBuildPhase("failed");
+          setBuildMessage(statusResult.data.message || "Build failed");
+          setRebuildingId(null);
+          const r = await fetchGithubDeployments(clusterId);
+          if (r.success) setDeployments(r.data);
+        }
+      }, 3000);
+
+      logsPollRef.current = setInterval(async () => {
+        const logsResult = await getBuildLogsAction(clusterId, ns, jobName);
+        if (logsResult.success) setBuildLogs(logsResult.data);
+      }, 5000);
+    } else if (result.success) {
+      // Manifest-based redeploy completed immediately
+      toast.success("Redeployed successfully");
+      setRebuildingId(null);
+      const r = await fetchGithubDeployments(clusterId);
+      if (r.success) setDeployments(r.data);
+    } else {
+      toast.error(result.error);
+      setRebuildingId(null);
+      const r = await fetchGithubDeployments(clusterId);
+      if (r.success) setDeployments(r.data);
+    }
+  }
+
   function handleTemplateSelect(templateConfig: DeploymentTemplateConfig) {
     setConfig({
       name: templateConfig.name,
@@ -373,8 +444,8 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
           </div>
         )}
 
-        {/* Build progress (Dockerfile + registry mode) */}
-        {analysis && isDockerfile && hasBuildMode && (
+        {/* Build progress (Dockerfile + registry mode, or rebuild) */}
+        {((analysis && isDockerfile && hasBuildMode) || (rebuildingId && buildPhase !== "idle")) && (
           <BuildProgress
             phase={buildPhase}
             logs={buildLogs}
@@ -423,6 +494,8 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
             <GithubDeploymentsList
               deployments={deployments}
               onRemove={handleRemove}
+              onRebuild={handleRebuild}
+              rebuildingId={rebuildingId}
             />
           </div>
         </>

@@ -11,6 +11,7 @@ import {
   Clock,
   FolderOpen,
   ChevronRight,
+  RotateCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -68,9 +69,13 @@ function getStatus(s: string): StatusCfg {
 function DeploymentRow({
   d,
   onRemove,
+  onRebuild,
+  rebuilding,
 }: {
   d: GithubDeploymentRow;
   onRemove: (id: string) => void;
+  onRebuild: (id: string) => void;
+  rebuilding: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
   const cfg = getStatus(d.status);
@@ -149,6 +154,16 @@ function DeploymentRow({
         <Button
           variant="ghost"
           size="icon"
+          className="size-7 text-muted-foreground opacity-0 transition-colors group-hover:opacity-100 hover:text-primary"
+          title="Rebuild"
+          disabled={rebuilding || d.status === "deploying"}
+          onClick={(e) => { e.stopPropagation(); onRebuild(d.id); }}
+        >
+          <RotateCw className={cn("size-3.5", rebuilding && "animate-spin")} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
           className={cn(
             "size-7 transition-colors",
             confirming
@@ -171,11 +186,15 @@ function DeploymentRow({
 interface GithubDeploymentsListProps {
   deployments: GithubDeploymentRow[];
   onRemove: (id: string) => void;
+  onRebuild: (id: string) => void;
+  rebuildingId: string | null;
 }
 
 export function GithubDeploymentsList({
   deployments,
   onRemove,
+  onRebuild,
+  rebuildingId,
 }: GithubDeploymentsListProps) {
   // Group by namespace
   const grouped: Record<string, GithubDeploymentRow[]> = {};
@@ -227,7 +246,7 @@ export function GithubDeploymentsList({
             </div>
             <div className="divide-y overflow-hidden rounded-lg border">
               {grouped[ns].map((d) => (
-                <DeploymentRow key={d.id} d={d} onRemove={onRemove} />
+                <DeploymentRow key={d.id} d={d} onRemove={onRemove} onRebuild={onRebuild} rebuilding={rebuildingId === d.id} />
               ))}
             </div>
           </div>

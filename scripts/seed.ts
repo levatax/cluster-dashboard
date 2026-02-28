@@ -15,7 +15,12 @@ if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
   process.exit(1);
 }
 
-const UserSchema = new mongoose.Schema(
+interface IUser {
+  username: string;
+  password_hash: string;
+}
+
+const UserSchema = new mongoose.Schema<IUser>(
   {
     username: { type: String, required: true, unique: true },
     password_hash: { type: String, required: true },
@@ -27,19 +32,11 @@ async function seed() {
   await mongoose.connect(MONGODB_URI!);
   console.log("Connected to MongoDB");
 
-  const User = mongoose.models.User || mongoose.model("User", UserSchema);
+  const User = (mongoose.models.User as mongoose.Model<IUser>) || mongoose.model<IUser>("User", UserSchema);
 
   const existing = await User.findOne({ username: ADMIN_USERNAME });
   if (existing) {
-    console.log(`User "${ADMIN_USERNAME}" already exists. Updating password...`);
-    const passwordHash = await hash(ADMIN_PASSWORD!, {
-      memoryCost: 19456,
-      timeCost: 2,
-      parallelism: 1,
-    });
-    existing.password_hash = passwordHash;
-    await existing.save();
-    console.log("Password updated successfully.");
+    console.log(`User "${ADMIN_USERNAME}" already exists. Skipping seed.`);
   } else {
     const passwordHash = await hash(ADMIN_PASSWORD!, {
       memoryCost: 19456,
