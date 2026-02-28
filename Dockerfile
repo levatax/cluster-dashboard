@@ -38,6 +38,9 @@ COPY . .
 
 RUN npm run build
 
+# Compile seed script to JS so it can run without tsx in the runner
+RUN npx tsc scripts/seed.ts --outDir scripts/compiled --esModuleInterop --module commonjs --skipLibCheck
+
 # ─── Stage 3: seed ───────────────────────────────────────────────────────────
 # One-off image for seeding the admin user. Build with --target seed.
 # docker build --target seed -t cluster-dashboard-seed .
@@ -84,9 +87,15 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Copy compiled seed script, node_modules it needs, and startup wrapper
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/scripts/compiled/seed.js ./scripts/seed.js
+COPY start.sh ./start.sh
+RUN chmod +x start.sh
+
 USER nextjs
 
 EXPOSE $PORT
 
-# next start in standalone mode
-CMD ["node", "server.js"]
+# Seed admin user (if credentials provided) then start server
+CMD ["./start.sh"]

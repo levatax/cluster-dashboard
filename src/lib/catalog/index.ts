@@ -21,9 +21,10 @@ import { wordpress } from "./apps/wordpress";
 import { gitea } from "./apps/gitea";
 import { harbor } from "./apps/harbor";
 import { containerRegistry } from "./apps/container-registry";
+import { mongoExpress } from "./apps/mongo-express";
 
 const ALL_APPS: CatalogApp[] = [
-  postgresql, mysql, mariadb, mongodb,
+  postgresql, mysql, mariadb, mongodb, mongoExpress,
   redis, memcached,
   nginx, wordpress,
   traefik, ingressNginx,
