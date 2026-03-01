@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, ChevronDown, ChevronRight, Lock, Eye, EyeOff } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Plus, Trash2, ChevronDown, ChevronRight, Lock, Eye, EyeOff, ClipboardPaste } from "lucide-react";
 
 export interface EnvVar {
   key: string;
@@ -19,9 +20,31 @@ interface EnvVarsEditorProps {
   onChange: (envVars: EnvVar[]) => void;
 }
 
+function parseEnvFile(text: string): EnvVar[] {
+  const vars: EnvVar[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) continue;
+    const key = trimmed.slice(0, eqIndex).trim();
+    let value = trimmed.slice(eqIndex + 1).trim();
+    // Strip surrounding quotes
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (!key) continue;
+    const isSecret = /secret|password|token|key|api_key/i.test(key);
+    vars.push({ key, value, isSecret });
+  }
+  return vars;
+}
+
 export function EnvVarsEditor({ envVars, onChange }: EnvVarsEditorProps) {
   const [expanded, setExpanded] = useState(envVars.length > 0);
   const [visibleSecrets, setVisibleSecrets] = useState<Set<number>>(new Set());
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pasteText, setPasteText] = useState("");
 
   function addEnvVar() {
     onChange([...envVars, { key: "", value: "", isSecret: false }]);
@@ -53,6 +76,25 @@ export function EnvVarsEditor({ envVars, onChange }: EnvVarsEditorProps) {
       }
       return next;
     });
+  }
+
+  function handlePasteImport() {
+    const parsed = parseEnvFile(pasteText);
+    if (parsed.length === 0) return;
+    // Merge: overwrite existing keys, append new ones
+    const merged = [...envVars];
+    for (const newVar of parsed) {
+      const existingIndex = merged.findIndex((e) => e.key === newVar.key);
+      if (existingIndex !== -1) {
+        merged[existingIndex] = newVar;
+      } else {
+        merged.push(newVar);
+      }
+    }
+    onChange(merged);
+    setPasteText("");
+    setPasteMode(false);
+    setExpanded(true);
   }
 
   const secretCount = envVars.filter((e) => e.isSecret).length;
@@ -95,23 +137,79 @@ export function EnvVarsEditor({ envVars, onChange }: EnvVarsEditorProps) {
             </div>
           )}
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            addEnvVar();
-          }}
-        >
-          <Plus className="size-4 mr-1" />
-          Add
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPasteMode(!pasteMode);
+              setExpanded(true);
+            }}
+          >
+            <ClipboardPaste className="size-4 mr-1" />
+            Paste .env
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              addEnvVar();
+            }}
+          >
+            <Plus className="size-4 mr-1" />
+            Add
+          </Button>
+        </div>
       </div>
 
       {expanded && (
         <div className="border-t p-3 space-y-3">
-          {envVars.length === 0 ? (
+          {pasteMode && (
+            <div className="space-y-2 rounded-md border border-dashed p-3">
+              <p className="text-xs text-muted-foreground">
+                Paste your <code className="rounded bg-muted px-1">.env</code> file contents below. Lines with <code className="rounded bg-muted px-1">KEY=value</code> format will be parsed. Comments and empty lines are ignored.
+              </p>
+              <Textarea
+                placeholder={"DATABASE_URL=postgres://localhost:5432/mydb\nAPI_KEY=sk-...\n# Comments are ignored"}
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                rows={6}
+                className="font-mono text-sm"
+                autoFocus
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  {parseEnvFile(pasteText).length > 0
+                    ? `${parseEnvFile(pasteText).length} variable${parseEnvFile(pasteText).length !== 1 ? "s" : ""} detected`
+                    : "No variables detected yet"}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setPasteMode(false); setPasteText(""); }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={parseEnvFile(pasteText).length === 0}
+                    onClick={handlePasteImport}
+                  >
+                    Import {parseEnvFile(pasteText).length > 0 ? `${parseEnvFile(pasteText).length} variables` : ""}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {envVars.length === 0 && !pasteMode ? (
             <p className="text-sm text-muted-foreground text-center py-4">
               No environment variables defined.
             </p>

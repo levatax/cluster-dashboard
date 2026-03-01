@@ -21,6 +21,7 @@ import {
   fetchGithubDeployments,
   removeGithubDeployment,
   rebuildGithubDeployment,
+  finishRebuildAction,
   startBuildAction,
   getBuildStatusAction,
   getBuildLogsAction,
@@ -283,20 +284,11 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
         if (phase === "succeeded") {
           stopPolling();
           setBuildPhase("succeeded");
-          // Re-apply manifests with the new image
-          const redeployResult = await deployFromGithub(clusterId,
-            deployment!.repo_url, deployment!.branch, deployment!.github_token, {
-              ...(deployment!.deploy_config as Record<string, string | number | boolean>),
-              name: deployment!.release_name,
-              namespace: ns,
-              image,
-              port: (deployment!.deploy_config as { port?: number }).port || 3000,
-              replicas: (deployment!.deploy_config as { replicas?: number }).replicas || 1,
-            });
-          if (redeployResult.success) {
+          const finishResult = await finishRebuildAction(clusterId, id, "deployed", image);
+          if (finishResult.success) {
             toast.success("Rebuild & deploy succeeded");
           } else {
-            toast.error(redeployResult.error);
+            toast.error(finishResult.error);
           }
           setRebuildingId(null);
           const r = await fetchGithubDeployments(clusterId);
@@ -305,6 +297,7 @@ export function GithubDeployPage({ clusterId }: GithubDeployPageProps) {
           stopPolling();
           setBuildPhase("failed");
           setBuildMessage(statusResult.data.message || "Build failed");
+          await finishRebuildAction(clusterId, id, "failed");
           setRebuildingId(null);
           const r = await fetchGithubDeployments(clusterId);
           if (r.success) setDeployments(r.data);

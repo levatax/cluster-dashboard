@@ -286,33 +286,41 @@ export async function rebuildGithubDeployment(
     // If the deployment used a built image, trigger a new build
     const registryUrl = await getClusterRegistryUrl(clusterId);
     if (registryUrl) {
-      const sha = await getLatestCommitSha(parsed.owner, parsed.repo, branch, token);
-      const safeName = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 30);
-      const jobName = `build-${safeName}-${sha}`;
-      const image = `${registryUrl}/${safeName}:${sha}`;
-      const repoHttpsUrl = `https://github.com/${parsed.owner}/${parsed.repo}.git`;
+      try {
+        const sha = await getLatestCommitSha(parsed.owner, parsed.repo, branch, token);
+        const safeName = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 30);
+        const jobName = `build-${safeName}-${sha}`;
+        const image = `${registryUrl}/${safeName}:${sha}`;
+        const repoHttpsUrl = `https://github.com/${parsed.owner}/${parsed.repo}.git`;
 
-      const buildArgs: Record<string, string> = {};
-      const envVars = deployConfig.envVars;
-      if (envVars) {
-        for (const envVar of envVars) {
-          buildArgs[envVar.key] = envVar.value;
+        const buildArgs: Record<string, string> = {};
+        const envVars = deployConfig.envVars;
+        if (envVars) {
+          for (const envVar of envVars) {
+            buildArgs[envVar.key] = envVar.value;
+          }
         }
+
+        await createBuildJob(cluster.kubeconfig_yaml, {
+          jobName,
+          namespace: ns,
+          repoHttpsUrl,
+          githubToken: token || undefined,
+          branch,
+          destination: image,
+          registryUrl,
+          appName: safeName,
+          buildArgs,
+        });
+
+        return { success: true, data: { jobName, image } };
+      } catch (e) {
+        await updateGithubDeploymentStatus(deploymentId, "failed");
+        await insertDeploymentHistory(clusterId, "github", deploymentId, "redeploy", name, ns, "failed", {
+          error: e instanceof Error ? e.message : "Build start failed",
+        });
+        return { success: false, error: e instanceof Error ? e.message : "Failed to start build" };
       }
-
-      await createBuildJob(cluster.kubeconfig_yaml, {
-        jobName,
-        namespace: ns,
-        repoHttpsUrl,
-        githubToken: token || undefined,
-        branch,
-        destination: image,
-        registryUrl,
-        appName: safeName,
-        buildArgs,
-      });
-
-      return { success: true, data: { jobName, image } };
     }
 
     // No registry — just re-apply the generated manifests with the existing image
@@ -348,7 +356,66 @@ export async function rebuildGithubDeployment(
       return { success: false, error: e instanceof Error ? e.message : "Redeploy failed" };
     }
   } catch (e) {
+    try { await updateGithubDeploymentStatus(deploymentId, "failed"); } catch { /* best effort */ }
     return { success: false, error: e instanceof Error ? e.message : "Failed to rebuild" };
+  }
+}
+
+export async function finishRebuildAction(
+  clusterId: string,
+  deploymentId: string,
+  status: "deployed" | "failed",
+  image?: string
+): Promise<ActionResult<void>> {
+  try {
+    await requireSession();
+    const cluster = await getClusterById(clusterId);
+    if (!cluster) return { success: false, error: "Cluster not found" };
+
+    const allDeployments = await getGithubDeployments(clusterId);
+    const deployment = allDeployments.find((d) => d.id === deploymentId);
+    if (!deployment) return { success: false, error: "Deployment not found" };
+
+    const name = deployment.release_name;
+    const ns = deployment.namespace;
+
+    if (status === "deployed" && image) {
+      // Re-apply manifests with the new image
+      const deployConfig = deployment.deploy_config as {
+        port?: number;
+        replicas?: number;
+        env?: Record<string, string>;
+        envVars?: EnvVar[];
+        ingressEnabled?: boolean;
+        ingressHost?: string;
+      };
+
+      const manifestYaml = generateDeploymentManifests({
+        name,
+        namespace: ns,
+        image,
+        port: deployConfig.port || 3000,
+        replicas: deployConfig.replicas || 1,
+        env: deployConfig.env,
+        envVars: deployConfig.envVars,
+        ingress: deployConfig.ingressEnabled
+          ? { enabled: true, host: deployConfig.ingressHost }
+          : undefined,
+      });
+
+      const docs = yaml.loadAll(manifestYaml) as k8s.KubernetesObject[];
+      for (const doc of docs) {
+        if (doc && typeof doc === "object") {
+          await applyResourceYaml(cluster.kubeconfig_yaml, doc);
+        }
+      }
+    }
+
+    await updateGithubDeploymentStatus(deploymentId, status);
+    await insertDeploymentHistory(clusterId, "github", deploymentId, "redeploy", name, ns, status);
+    return { success: true, data: undefined };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Failed to finish rebuild" };
   }
 }
 
